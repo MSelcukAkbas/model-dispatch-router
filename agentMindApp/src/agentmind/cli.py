@@ -7,11 +7,13 @@ emit into the same event log without language bindings.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .context import build_context, build_file_context, estimate_tokens
@@ -26,6 +28,17 @@ app = typer.Typer(
     help="AgentMind kernel — event log, task history and claim store.",
     no_args_is_help=True,
 )
+# Windows consoles default to a legacy code page - cp1254 on a Turkish install -
+# and agent-written claim text routinely carries characters it cannot encode
+# (arrows, em-dashes, box drawing). That raised UnicodeEncodeError partway
+# through rendering, killing the command over one character in one claim.
+# Force UTF-8 where the stream allows it and replace what still will not fit.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):  # not a real tty, or already fixed
+        pass
+
 console = Console()
 
 
@@ -59,7 +72,14 @@ def _open(
 
 
 def _fmt(value: object) -> str:
-    return "" if value is None else str(value)
+    """Stringify a stored value for display.
+
+    Everything reaching this came out of the claim store, where the text was
+    written by an agent: it routinely contains square brackets (array indices,
+    `[candidate]`, log excerpts) which rich parses as markup and then dies on.
+    Escaping here means no caller has to remember to.
+    """
+    return "" if value is None else escape(str(value))
 
 
 # --------------------------------------------------------------------- init
@@ -159,7 +179,7 @@ def tasks(
         table.add_column(col, overflow="fold")
     for r in rows:
         table.add_row(
-            r["task_id"],
+            _fmt(r["task_id"]),
             _fmt(r["role"]),
             _fmt(r["engine"]),
             _fmt(r["model"]),
@@ -191,7 +211,7 @@ def events(
         table.add_column(col, overflow="fold")
     for r in rows:
         table.add_row(
-            str(r["id"]), _fmt(r["ts"])[:19], r["kind"],
+            str(r["id"]), _fmt(r["ts"])[:19], _fmt(r["kind"]),
             _fmt(r["task_id"]), _fmt(r["actor"]), _fmt(r["payload_json"])[:80],
         )
     console.print(table)
@@ -350,7 +370,7 @@ def why(
     db, repo = _open(root)
     rows = repo.claims_for_file(file)
     if not rows:
-        console.print(f"[yellow]no claims reference[/yellow] {file}")
+        console.print(f"[yellow]no claims reference[/yellow] {escape(file)}")
         db.close()
         return
 
@@ -374,14 +394,14 @@ def why(
             f = evaluate(src, r["commit_sha"], [file])
             tone = "green" if f.label == "fresh" else "red"
             head += f"  [{tone}]{f.label}[/{tone}]"
-        head += f"  [dim]{r['source_task'] or ''}[/dim]"
+        head += f"  [dim]{_fmt(r['source_task'])}[/dim]"
         console.print(head)
-        console.print(f"          [dim]{r['topic']}[/dim]")
+        console.print(f"          [dim]{_fmt(r['topic'])}[/dim]")
         claim_text = " ".join(str(r["claim"]).split())
-        console.print(f"          {claim_text[:160]}")
+        console.print("          " + escape(claim_text[:160]))
         target = (
             "[red]dangling[/red]" if r["dangling"]
-            else f"[dim]-> {r['graph_node_id']}[/dim]"
+            else f"[dim]-> {_fmt(r['graph_node_id'])}[/dim]"
         )
         console.print(f"          {target}")
         console.print()
@@ -430,7 +450,7 @@ def dangling(
     console.print()
     for r in repo.dangling_by_file(limit=limit, reason=reason):
         tone = "red" if r["reason"] == "file_missing" else "yellow"
-        console.print(f"  [{tone}]{r['reason']}[/{tone}]  [bold]{r['file']}[/bold]")
+        console.print(f"  [{tone}]{_fmt(r['reason'])}[/{tone}]  [bold]{_fmt(r['file'])}[/bold]")
         tasks = ", ".join(sorted(set((r["tasks"] or "").split(","))))
         console.print(
             f"      {r['claims']} claim(s), {r['refs']} ref(s)   [dim]{tasks}[/dim]"
@@ -452,7 +472,7 @@ def hot(
     for col in ("claims", "resolved", "file"):
         table.add_column(col)
     for r in repo.hot_files(limit=limit):
-        table.add_row(str(r["claims"]), _fmt(r["resolved"]), r["file"])
+        table.add_row(str(r["claims"]), _fmt(r["resolved"]), _fmt(r["file"]))
     console.print(table)
     db.close()
 
@@ -624,7 +644,7 @@ def gate(
     table.add_column("detail", overflow="fold")
     for c in result.checks:
         mark = "[green]pass[/green]" if c.ok else "[red]FAIL[/red]"
-        table.add_row(c.name, mark, c.detail)
+        table.add_row(c.name, mark, escape(c.detail))
     console.print(table)
 
     if result.passed:
