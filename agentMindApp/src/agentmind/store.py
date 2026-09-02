@@ -64,6 +64,29 @@ def find_store(start: Path | str | None = None) -> Path | None:
     return None
 
 
+def nearby_stores(start: Path | str | None = None, limit: int = 5) -> list[Path]:
+    """Stores in immediate subdirectories, for the "wrong side of it" case.
+
+    find_store only walks up, so standing one level *above* a workspace finds
+    nothing - which is the easiest mistake to make and the least obvious to
+    diagnose. One shallow look down turns a dead end into a suggestion.
+    """
+    base = Path(start or Path.cwd()).expanduser().resolve()
+    found: list[Path] = []
+    try:
+        children = sorted(p for p in base.iterdir() if p.is_dir())
+    except OSError:
+        return found
+    for child in children:
+        if child.name.startswith("."):
+            continue
+        if (child / DEFAULT_DB_RELPATH).is_file():
+            found.append(child)
+            if len(found) >= limit:
+                break
+    return found
+
+
 def resolve_db_path(root: Path | str | None = None) -> Path:
     """Where am.db lives.
 

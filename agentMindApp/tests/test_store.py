@@ -119,3 +119,34 @@ def test_an_explicit_root_always_wins_over_the_search(tmp_path):
 
     assert rdp(other) == other / ".agentmind" / "am.db"
     assert find_store(workspace) is not None
+
+
+def test_nearby_stores_looks_one_level_down(tmp_path):
+    """Standing just above a workspace is the easiest mistake to make and the
+    least obvious to diagnose, so the failure path offers a way out."""
+    from agentmind.store import find_store, nearby_stores
+
+    workspace = tmp_path / "myproject"
+    workspace.mkdir()
+    Database(resolve_db_path(workspace)).init_db()
+    (tmp_path / "unrelated").mkdir()
+
+    assert find_store(tmp_path) is None          # upward search finds nothing
+    assert nearby_stores(tmp_path) == [workspace]
+
+
+def test_nearby_stores_skips_dotted_directories(tmp_path):
+    from agentmind.store import nearby_stores
+
+    hidden = tmp_path / ".cache"
+    hidden.mkdir()
+    Database(resolve_db_path(hidden)).init_db()
+
+    assert nearby_stores(tmp_path) == []
+
+
+def test_nearby_stores_is_empty_when_there_is_nothing(tmp_path):
+    from agentmind.store import nearby_stores
+
+    (tmp_path / "a").mkdir()
+    assert nearby_stores(tmp_path) == []

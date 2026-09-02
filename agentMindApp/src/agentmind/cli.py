@@ -19,7 +19,7 @@ from .gate import evaluate_task, graph_delta
 from .importer import import_snapshot
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .snapshot import take_snapshot
-from .store import Database, Repository, find_store, resolve_db_path
+from .store import Database, Repository, find_store, nearby_stores, resolve_db_path
 
 app = typer.Typer(
     add_completion=False,
@@ -43,8 +43,15 @@ def _open(
         console.print(
             "[red]no AgentMind store found[/red] here or in any parent directory."
         )
-        console.print("  run [bold]am setup <repo>[/bold] to create one, "
-                      "or pass --root <path> to point at an existing workspace.")
+        nearby = nearby_stores()
+        if nearby:
+            console.print("  there is one just below you:")
+            for path in nearby:
+                console.print(f"    [bold]cd {path.name}[/bold]   "
+                              f"[dim]or: --root {path}[/dim]")
+        else:
+            console.print("  run [bold]am setup <repo>[/bold] to create one, "
+                          "or pass --root <path> to point at an existing workspace.")
         raise typer.Exit(2)
     db = Database(resolve_db_path(root))
     db.init_db()
