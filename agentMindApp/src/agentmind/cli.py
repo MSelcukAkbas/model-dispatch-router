@@ -14,6 +14,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from .context import build_context, build_file_context, estimate_tokens
 from .importer import import_snapshot
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .snapshot import take_snapshot
@@ -427,6 +428,150 @@ def hot(
     for r in repo.hot_files(limit=limit):
         table.add_row(str(r["claims"]), _fmt(r["resolved"]), r["file"])
     console.print(table)
+    db.close()
+
+
+# ------------------------------------------------------------------ context
+@app.command()
+def context(
+    query: str = typer.Argument(..., help="What the task is about."),
+    repo_name: str = typer.Option(..., "--repo", help="Corpus name."),
+    depth: int = typer.Option(2, "--depth", help="Hops to expand from the seeds."),
+    budget: int = typer.Option(2000, "--budget", help="Approx token budget."),
+    src: Optional[Path] = typer.Option(None, "--src", help="Tree for freshness checks."),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Print the graph context for a task - what a prompt would carry."""
+    db, repo = _open(root)
+    result = build_context(repo, repo_name, query, depth=depth, budget=budget, src=src)
+    if not result.text:
+        console.print(f"[yellow]nothing in the graph matched[/yellow] {query!r}")
+        db.close()
+        raise typer.Exit(1)
+    print(result.text)
+    console.print()
+    console.print(
+        f"[dim]~{result.tokens} tokens - {result.nodes} nodes, {result.edges} edges, "
+        f"{result.claims} claims, {len(result.files)} files[/dim]"
+    )
+    db.close()
+
+
+# ------------------------------------------------------------------- prompt
+@app.command()
+def prompt(
+    query: str = typer.Argument(..., help="What the task is about."),
+    goal: str = typer.Option(..., "--goal", help="The one sentence for the # GOAL: header."),
+    repo_name: str = typer.Option(..., "--repo", help="Corpus name."),
+    mode: str = typer.Option("graph", "--mode", help="graph | files"),
+    src: Optional[Path] = typer.Option(None, "--src", help="Working tree (required for files mode)."),
+    depth: int = typer.Option(2, "--depth"),
+    budget: int = typer.Option(2000, "--budget"),
+    out: Optional[Path] = typer.Option(None, "--out", help="Write to a file instead of stdout."),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Emit a dispatch.sh-ready prompt file.
+
+    The two headers are dispatch.sh's contract, not decoration: it refuses a
+    prompt with no `# GOAL:` (dispatch.sh:256) and uses `# FILES:` to reject a
+    task overlapping a still-running one (dispatch.sh:262).
+    """
+    if mode not in ("graph", "files"):
+        console.print("[red]--mode must be graph or files[/red]")
+        raise typer.Exit(1)
+    if mode == "files" and src is None:
+        console.print("[red]files mode needs --src[/red]")
+        raise typer.Exit(1)
+
+    db, repo = _open(root)
+    if mode == "graph":
+        result = build_context(repo, repo_name, query, depth=depth, budget=budget, src=src)
+    else:
+        result = build_file_context(repo, repo_name, query, src, depth=depth)
+
+    if not result.text:
+        console.print(f"[yellow]nothing in the graph matched[/yellow] {query!r}")
+        db.close()
+        raise typer.Exit(1)
+
+    header = [f"# GOAL: {goal}"]
+    if result.files:
+        header.append("# FILES: " + ",".join(result.files))
+    body = ("\n".join(header) + "\n\n" + result.text + "\n")
+
+    if out:
+        Path(out).write_text(body, encoding="utf-8")
+        repo.add_event(
+            "prompt.built", actor="am prompt",
+            payload={"repo": repo_name, "mode": mode, "query": query,
+                     "tokens": estimate_tokens(body), "files": len(result.files)},
+        )
+        console.print(
+            f"[green]wrote[/green] {out}  [dim]~{estimate_tokens(body)} tokens, "
+            f"{len(result.files)} files[/dim]"
+        )
+    else:
+        print(body)
+    db.close()
+
+
+# -------------------------------------------------------------------- bench
+@app.command()
+def bench(
+    queries: list[str] = typer.Argument(..., help="One or more task descriptions."),
+    repo_name: str = typer.Option(..., "--repo", help="Corpus name."),
+    src: Path = typer.Option(..., "--src", help="Working tree the files live in."),
+    depth: int = typer.Option(2, "--depth"),
+    budget: int = typer.Option(2000, "--budget"),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Measure graph context against the file-dump baseline, per task.
+
+    This is the number the whole design is a bet on. Both modes are pointed at
+    the same target files, so what is being compared is amount-of-text, not
+    scope.
+    """
+    db, repo = _open(root)
+    table = Table(title="prompt cost: files vs graph", header_style="bold")
+    for col in ("task", "files", "files ~tok", "graph ~tok", "saved", "claims"):
+        table.add_column(col, overflow="fold")
+
+    total_files = total_graph = 0
+    for query in queries:
+        baseline = build_file_context(repo, repo_name, query, src, depth=depth)
+        graph_ctx = build_context(
+            repo, repo_name, query, depth=depth, budget=budget, src=None
+        )
+        if not graph_ctx.text:
+            table.add_row(query[:28], "-", "-", "[yellow]no match[/yellow]", "-", "-")
+            continue
+        total_files += baseline.tokens
+        total_graph += graph_ctx.tokens
+        saved = 100 - (100 * graph_ctx.tokens // max(baseline.tokens, 1))
+        tone = "green" if saved > 0 else "red"
+        table.add_row(
+            query[:28], str(len(baseline.files)), f"{baseline.tokens:,}",
+            f"{graph_ctx.tokens:,}", f"[{tone}]{saved}%[/{tone}]", str(graph_ctx.claims),
+        )
+
+    console.print(table)
+    if total_files:
+        overall = 100 - (100 * total_graph // total_files)
+        ratio = total_files / max(total_graph, 1)
+        console.print(
+            f"[bold]overall[/bold] {total_files:,} -> {total_graph:,} tokens  "
+            f"([green]{overall}% less[/green], {ratio:.1f}x)"
+        )
+        repo.add_event(
+            "bench.run", actor="am bench",
+            payload={"repo": repo_name, "queries": len(queries),
+                     "files_tokens": total_files, "graph_tokens": total_graph,
+                     "saved_pct": overall},
+        )
+    console.print(
+        "[dim]token counts use graphify's ~3-chars-per-token estimate, "
+        "identical for both modes[/dim]"
+    )
     db.close()
 
 

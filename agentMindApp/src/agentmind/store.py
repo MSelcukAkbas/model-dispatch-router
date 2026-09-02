@@ -330,6 +330,15 @@ class Repository:
             )
         )
 
+    def all_nodes(self, repo_name: str) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT node_id, label, source_file, source_line, node_kind"
+                " FROM graph_nodes WHERE repo = ?",
+                (repo_name,),
+            )
+        )
+
     def all_edges(self, repo_name: str) -> list[sqlite3.Row]:
         return list(
             self._db.conn.execute(
@@ -385,7 +394,7 @@ class Repository:
         return list(
             self._db.conn.execute(
                 "SELECT DISTINCT c.id, c.topic, c.claim, c.status, c.source_task,"
-                "       r.file, r.line"
+                "       c.commit_sha, r.file, r.line"
                 " FROM claims c JOIN node_refs r ON r.claim_id = c.id"
                 " WHERE r.graph_node_id = ? ORDER BY c.id",
                 (node_id,),
