@@ -20,7 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 # graphify enters at Phase 1 (resolver/context). Kept out of the base install
 # so Phase 0 does not depend on those grammar wheels resolving.
-graph = ["graphifyy==0.9.53"]
+# [sql] pulls tree-sitter-sql: without it graphify silently drops .sql
+# files from the graph (agentic-ssh-mcp's app/db/schema.sql is one).
+graph = ["graphifyy[sql]==0.9.53"]
 
 [project.scripts]
 am = "agentmind.cli:main"
