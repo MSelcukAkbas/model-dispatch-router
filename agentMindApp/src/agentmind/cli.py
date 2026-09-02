@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .importer import import_snapshot
+from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .snapshot import take_snapshot
 from .store import Database, Repository, resolve_db_path
 
@@ -219,6 +220,213 @@ def stats(root: Path = typer.Option(Path.cwd(), "--root")) -> None:
     for r in repo.claim_status_counts():
         status.add_row(_fmt(r["status"]), str(r["n"]))
     console.print(status)
+    db.close()
+
+
+# -------------------------------------------------------------------- graph
+graph_app = typer.Typer(help="Code graph: extract a corpus and inspect it.", no_args_is_help=True)
+app.add_typer(graph_app, name="graph")
+
+
+@graph_app.command("build")
+def graph_build(
+    source: Path = typer.Argument(..., help="Repo to extract."),
+    name: Optional[str] = typer.Option(None, "--name", help="Corpus name (default: dir name)."),
+    from_claims: bool = typer.Option(
+        False, "--from-claims",
+        help="Only extract files the imported claims cite — for a monorepo where "
+             "a full extraction is neither needed nor cheap.",
+    ),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Extract a repo with graphify and store the graph. Read-only on the source."""
+    db, repo = _open(root)
+    only = claim_evidence_files(repo) if from_claims else None
+    if from_claims and not only:
+        console.print("[yellow]no claim evidence to target — import a snapshot first[/yellow]")
+        db.close()
+        raise typer.Exit(1)
+
+    result = build_graph(repo, source, repo_name=name, only_files=only)
+    repo.add_event(
+        "graph.built", actor="am graph build",
+        payload={"repo": result.repo, "nodes": result.nodes, "edges": result.edges,
+                 "from_claims": from_claims},
+    )
+    console.print(
+        f"[green]built[/green] repo={result.repo} nodes={result.nodes} edges={result.edges}"
+    )
+    for note in result.notes:
+        console.print(f"  [yellow]note:[/yellow] {note}")
+    db.close()
+
+
+@graph_app.command("info")
+def graph_info(root: Path = typer.Option(Path.cwd(), "--root")) -> None:
+    """Which corpora are stored and how big they are."""
+    db, repo = _open(root)
+    table = Table(title="code graphs", header_style="bold")
+    for col in ("repo", "nodes", "edges", "built"):
+        table.add_column(col)
+    for r in repo.graph_repos():
+        _, edges = repo.count_graph(r["repo"])
+        table.add_row(r["repo"], str(r["nodes"]), str(edges), _fmt(r["built_at"])[:19])
+    console.print(table)
+    db.close()
+
+
+# ------------------------------------------------------------------ resolve
+@app.command()
+def resolve(
+    repo_name: str = typer.Option(..., "--repo", help="Corpus name from `am graph info`."),
+    src: Optional[Path] = typer.Option(
+        None, "--src",
+        help="Working tree the evidence paths are relative to. With it, a miss "
+             "can say whether the file is gone or merely unparsed.",
+    ),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Join claim evidence to graph nodes (rebuilds node_refs)."""
+    db, repo = _open(root)
+    result = resolve_claims(repo, repo_name, source_root=src)
+    repo.add_event(
+        "claims.resolved", actor="am resolve",
+        payload={"repo": repo_name, "refs": result.refs,
+                 "resolved": result.resolved, "dangling": result.dangling,
+                 "by_reason": result.by_reason},
+    )
+    pct = (100 * result.resolved / result.refs) if result.refs else 0
+    console.print(
+        f"[green]resolved[/green] {result.resolved}/{result.refs} refs ({pct:.0f}%)  "
+        f"claims-without-evidence={result.claims_without_evidence}"
+    )
+    for reason, n in sorted(result.by_reason.items(), key=lambda kv: -kv[1]):
+        if reason != "resolved":
+            console.print(f"  [yellow]{reason}[/yellow]: {n}")
+    if src is None and result.dangling:
+        console.print("[dim]pass --src <repo> to split misses into file_missing vs not_extracted[/dim]")
+    db.close()
+
+
+# ---------------------------------------------------------------------- why
+@app.command()
+def why(
+    file: str = typer.Argument(..., help="Repo-relative path, e.g. app/jobs/manager.py"),
+    src: Optional[Path] = typer.Option(
+        None, "--src", help="Working tree to check evidence freshness against."
+    ),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """What agents have claimed about this file, and whether it still holds."""
+    from .freshness import evaluate
+
+    db, repo = _open(root)
+    rows = repo.claims_for_file(file)
+    if not rows:
+        console.print(f"[yellow]no claims reference[/yellow] {file}")
+        db.close()
+        return
+
+    fresh = evaluate(src, rows[0]["commit_sha"], [file]).label if src else ""
+    console.print()
+    console.print(f"[bold]{file}[/bold]  [dim]— {len(rows)} claim(s)[/dim]")
+    console.print()
+
+    status_colour = {
+        "candidate": "yellow", "verified": "green", "stale": "red",
+        "superseded": "dim", "promoted": "cyan",
+    }
+    for r in rows:
+        colour = status_colour.get(r["status"], "white")
+        line = f"L{r['line']}" if r["line"] else "  —"
+        head = (
+            f"  [cyan]{line:>6}[/cyan]  [dim]#{r['id']}[/dim]  "
+            f"[{colour}]{r['status']}[/{colour}]"
+        )
+        if src:
+            f = evaluate(src, r["commit_sha"], [file])
+            tone = "green" if f.label == "fresh" else "red"
+            head += f"  [{tone}]{f.label}[/{tone}]"
+        head += f"  [dim]{r['source_task'] or ''}[/dim]"
+        console.print(head)
+        console.print(f"          [dim]{r['topic']}[/dim]")
+        claim_text = " ".join(str(r["claim"]).split())
+        console.print(f"          {claim_text[:160]}")
+        target = (
+            "[red]dangling[/red]" if r["dangling"]
+            else f"[dim]-> {r['graph_node_id']}[/dim]"
+        )
+        console.print(f"          {target}")
+        console.print()
+
+    if src is None:
+        console.print("[dim]pass --src <repo> to check whether the evidence is still fresh[/dim]")
+    db.close()
+
+
+# ----------------------------------------------------------------- dangling
+@app.command()
+def dangling(
+    limit: int = typer.Option(30, "--limit"),
+    reason: Optional[str] = typer.Option(
+        None, "--reason", help="file_missing | not_extracted | unresolved"
+    ),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Evidence pointing at code the graph has no node for — the code moved."""
+    db, repo = _open(root)
+    rows = repo.dangling_refs(limit=limit, reason=reason)
+    summary = repo.resolution_summary()
+    if not rows:
+        console.print("[green]no dangling references[/green]")
+        db.close()
+        return
+
+    breakdown = Table(title="why references did not resolve", header_style="bold")
+    for col in ("reason", "refs", "files"):
+        breakdown.add_column(col)
+    for r in repo.reason_counts():
+        if r["reason"] == "resolved":
+            continue
+        breakdown.add_row(_fmt(r["reason"]), str(r["n"]), str(r["files"]))
+    console.print(breakdown)
+    console.print(
+        "[dim]file_missing = the cited path is gone (real code drift)   "
+        "not_extracted = file present, no extractor for its type[/dim]"
+    )
+    console.print()
+
+    console.print(
+        f"[bold]{summary['dangling']}/{summary['total']}[/bold] references "
+        f"could not be bound"
+    )
+    console.print()
+    for r in repo.dangling_by_file(limit=limit, reason=reason):
+        tone = "red" if r["reason"] == "file_missing" else "yellow"
+        console.print(f"  [{tone}]{r['reason']}[/{tone}]  [bold]{r['file']}[/bold]")
+        tasks = ", ".join(sorted(set((r["tasks"] or "").split(","))))
+        console.print(
+            f"      {r['claims']} claim(s), {r['refs']} ref(s)   [dim]{tasks}[/dim]"
+        )
+    console.print()
+    console.print("[dim]am dangling --reason file_missing   shows only real code drift[/dim]")
+    db.close()
+
+
+# ---------------------------------------------------------------------- hot
+@app.command()
+def hot(
+    limit: int = typer.Option(15, "--limit"),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Files the most claims point at — where agent attention has actually gone."""
+    db, repo = _open(root)
+    table = Table(title="most-cited files", header_style="bold")
+    for col in ("claims", "resolved", "file"):
+        table.add_column(col)
+    for r in repo.hot_files(limit=limit):
+        table.add_row(str(r["claims"]), _fmt(r["resolved"]), r["file"])
+    console.print(table)
     db.close()
 
 

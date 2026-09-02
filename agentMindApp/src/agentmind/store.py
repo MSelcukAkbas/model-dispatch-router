@@ -263,6 +263,194 @@ class Repository:
             )
         )
 
+    # ----------------------------------------------------------- code graph
+    def replace_graph(
+        self, repo_name: str, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
+    ) -> tuple[int, int]:
+        """Swap in a freshly extracted graph for one corpus.
+
+        Delete-then-insert scoped to `repo_name`: a rebuild must not leave
+        nodes behind for code that was removed, or the resolver would keep
+        binding claims to symbols that no longer exist.
+        """
+        conn = self._db.conn
+        conn.execute("DELETE FROM graph_nodes WHERE repo = ?", (repo_name,))
+        conn.execute("DELETE FROM graph_edges WHERE repo = ?", (repo_name,))
+        built = utcnow()
+        conn.executemany(
+            "INSERT INTO graph_nodes"
+            " (node_id, repo, label, source_file, source_line, node_kind, file_type, built_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (n["node_id"], repo_name, n.get("label"), n.get("source_file"),
+                 n.get("source_line"), n.get("node_kind"), n.get("file_type"), built)
+                for n in nodes
+            ],
+        )
+        conn.executemany(
+            "INSERT OR IGNORE INTO graph_edges"
+            " (repo, source, target, relation, confidence, source_file, source_line)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (repo_name, e["source"], e["target"], e.get("relation"),
+                 e.get("confidence"), e.get("source_file"), e.get("source_line"))
+                for e in edges
+            ],
+        )
+        conn.commit()
+        return len(nodes), len(edges)
+
+    def nodes_for_file(self, repo_name: str, source_file: str) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT * FROM graph_nodes WHERE repo = ? AND source_file = ?"
+                " ORDER BY source_line",
+                (repo_name, source_file),
+            )
+        )
+
+    def count_graph(self, repo_name: str | None = None) -> tuple[int, int]:
+        if repo_name is None:
+            n = self._db.conn.execute("SELECT COUNT(*) FROM graph_nodes").fetchone()[0]
+            e = self._db.conn.execute("SELECT COUNT(*) FROM graph_edges").fetchone()[0]
+        else:
+            n = self._db.conn.execute(
+                "SELECT COUNT(*) FROM graph_nodes WHERE repo = ?", (repo_name,)
+            ).fetchone()[0]
+            e = self._db.conn.execute(
+                "SELECT COUNT(*) FROM graph_edges WHERE repo = ?", (repo_name,)
+            ).fetchone()[0]
+        return int(n), int(e)
+
+    def graph_repos(self) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT repo, COUNT(*) AS nodes, MAX(built_at) AS built_at"
+                " FROM graph_nodes GROUP BY repo ORDER BY nodes DESC"
+            )
+        )
+
+    def all_edges(self, repo_name: str) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT source, target, relation, confidence FROM graph_edges"
+                " WHERE repo = ?",
+                (repo_name,),
+            )
+        )
+
+    # ------------------------------------------------------------- node_refs
+    def replace_node_refs(self, rows: list[dict[str, Any]]) -> int:
+        conn = self._db.conn
+        conn.execute("DELETE FROM node_refs")
+        conn.executemany(
+            "INSERT INTO node_refs"
+            " (claim_id, evidence_idx, file, line, graph_node_id, resolved_at,"
+            "  dangling, reason)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (r["claim_id"], r["evidence_idx"], r["file"], r.get("line"),
+                 r.get("graph_node_id"), r.get("resolved_at"),
+                 int(r.get("dangling", 0)), r.get("reason", "resolved"))
+                for r in rows
+            ],
+        )
+        conn.commit()
+        return len(rows)
+
+    def resolution_summary(self) -> sqlite3.Row:
+        return self._db.conn.execute(
+            "SELECT COUNT(*) AS total,"
+            "       SUM(dangling = 0) AS resolved,"
+            "       SUM(dangling = 1) AS dangling,"
+            "       COUNT(DISTINCT claim_id) AS claims"
+            " FROM node_refs"
+        ).fetchone()
+
+    def claims_for_file(self, source_file: str) -> list[sqlite3.Row]:
+        """Every claim whose evidence points at this file — the `am why` query."""
+        return list(
+            self._db.conn.execute(
+                "SELECT DISTINCT c.id, c.topic, c.category, c.claim, c.status,"
+                "       c.source_task, c.source_role, c.commit_sha, c.created_at,"
+                "       r.line, r.graph_node_id, r.dangling"
+                " FROM claims c JOIN node_refs r ON r.claim_id = c.id"
+                " WHERE r.file = ?"
+                " ORDER BY r.line, c.id",
+                (source_file,),
+            )
+        )
+
+    def claims_for_node(self, node_id: str) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT DISTINCT c.id, c.topic, c.claim, c.status, c.source_task,"
+                "       r.file, r.line"
+                " FROM claims c JOIN node_refs r ON r.claim_id = c.id"
+                " WHERE r.graph_node_id = ? ORDER BY c.id",
+                (node_id,),
+            )
+        )
+
+    def dangling_refs(
+        self, limit: int = 50, reason: str | None = None
+    ) -> list[sqlite3.Row]:
+        sql = (
+            "SELECT r.file, r.line, r.reason, c.id AS claim_id, c.topic, c.status,"
+            "       c.source_task"
+            " FROM node_refs r JOIN claims c ON c.id = r.claim_id"
+            " WHERE r.dangling = 1"
+        )
+        params: list[Any] = []
+        if reason:
+            sql += " AND r.reason = ?"
+            params.append(reason)
+        sql += " ORDER BY r.file, r.line LIMIT ?"
+        params.append(limit)
+        return list(self._db.conn.execute(sql, params))
+
+    def dangling_by_file(
+        self, limit: int = 50, reason: str | None = None
+    ) -> list[sqlite3.Row]:
+        """One row per unresolved file — the readable view.
+
+        A single missing file usually accounts for many refs (one per cited
+        line), so the flat ref list buries the signal under repetition.
+        """
+        sql = (
+            "SELECT r.file, r.reason, COUNT(*) AS refs,"
+            "       COUNT(DISTINCT r.claim_id) AS claims,"
+            "       GROUP_CONCAT(DISTINCT c.source_task) AS tasks"
+            " FROM node_refs r JOIN claims c ON c.id = r.claim_id"
+            " WHERE r.dangling = 1"
+        )
+        params: list[Any] = []
+        if reason:
+            sql += " AND r.reason = ?"
+            params.append(reason)
+        sql += " GROUP BY r.file, r.reason ORDER BY claims DESC, refs DESC LIMIT ?"
+        params.append(limit)
+        return list(self._db.conn.execute(sql, params))
+
+    def reason_counts(self) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT reason, COUNT(*) AS n, COUNT(DISTINCT file) AS files"
+                " FROM node_refs GROUP BY reason ORDER BY n DESC"
+            )
+        )
+
+    def hot_files(self, limit: int = 15) -> list[sqlite3.Row]:
+        """Files the most claims point at — where agent attention has gone."""
+        return list(
+            self._db.conn.execute(
+                "SELECT file, COUNT(DISTINCT claim_id) AS claims,"
+                "       SUM(dangling = 0) AS resolved"
+                " FROM node_refs GROUP BY file ORDER BY claims DESC LIMIT ?",
+                (limit,),
+            )
+        )
+
     # ------------------------------------------------------------- bulk load
     def bulk(self, statement: str, rows: Iterable[Sequence[Any]]) -> int:
         cur = self._db.conn.executemany(statement, rows)

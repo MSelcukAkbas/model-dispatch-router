@@ -90,7 +90,43 @@ CREATE TABLE IF NOT EXISTS node_refs (
     graph_node_id TEXT,
     resolved_at   TEXT,
     dangling      INTEGER NOT NULL DEFAULT 0,
+    -- Why a ref did not resolve. 'resolved' | 'file_missing' (the cited path is
+    -- gone — the code really moved) | 'not_extracted' (the file is there but no
+    -- extractor covers it, e.g. .yaml). Collapsing these into one "dangling"
+    -- number made a tooling gap look like code drift.
+    reason        TEXT NOT NULL DEFAULT 'resolved',
     UNIQUE(claim_id, evidence_idx)
 );
 CREATE INDEX IF NOT EXISTS idx_node_refs_file ON node_refs(file);
 CREATE INDEX IF NOT EXISTS idx_node_refs_node ON node_refs(graph_node_id);
+
+-- The code graph, extracted by graphify and persisted here so overlay queries
+-- never need graphify at runtime — only `am graph build` does. Node ids are
+-- graphify's own; `source_line` is source_location parsed to an int (NULL for
+-- the file-level nodes that carry no line anchor).
+CREATE TABLE IF NOT EXISTS graph_nodes (
+    node_id     TEXT NOT NULL,
+    repo        TEXT NOT NULL DEFAULT '',
+    label       TEXT,
+    source_file TEXT,
+    source_line INTEGER,
+    node_kind   TEXT,
+    file_type   TEXT,
+    built_at    TEXT,
+    PRIMARY KEY (repo, node_id)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_file ON graph_nodes(repo, source_file);
+
+CREATE TABLE IF NOT EXISTS graph_edges (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo        TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    relation    TEXT,
+    confidence  TEXT,
+    source_file TEXT,
+    source_line INTEGER,
+    UNIQUE(repo, source, target, relation)
+);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(repo, source);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(repo, target);
