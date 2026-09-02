@@ -700,6 +700,72 @@ def setup(
     db.close()
 
 
+# ------------------------------------------------------------------- status
+@app.command()
+def status(root: Path = typer.Option(Path.cwd(), "--root")) -> None:
+    """Everything at a glance: history, memory, graph, and what is unverified."""
+    db, repo = _open(root)
+
+    tasks_n = repo.count_tasks()
+    claims_n = repo.count_claims()
+    events_n = repo.count_events()
+    nodes_n, edges_n = repo.count_graph()
+    statuses = {r["status"]: r["n"] for r in repo.claim_status_counts()}
+    verified = statuses.get("verified", 0)
+    candidates = statuses.get("candidate", 0)
+    summary = repo.resolution_summary()
+
+    console.print()
+    console.print("[bold]AgentMind[/bold]  [dim]" + str(db.path) + "[/dim]")
+    console.print()
+
+    left = Table.grid(padding=(0, 2))
+    left.add_column(style="dim")
+    left.add_column()
+    left.add_row("dispatch history", f"{tasks_n} tasks")
+    left.add_row("event log", f"{events_n} events")
+    left.add_row("code graph", f"{nodes_n} nodes, {edges_n} edges")
+    bound = summary["resolved"] or 0
+    total = summary["total"] or 0
+    pct = f"{100 * bound // total}%" if total else "-"
+    left.add_row("claims joined", f"{bound}/{total} refs ({pct})")
+    console.print(left)
+    console.print()
+
+    bar = Table(title="claim memory", header_style="bold")
+    for col in ("status", "n", "meaning"):
+        bar.add_column(col, overflow="fold")
+    meanings = {
+        "verified": "passed the gate on this machine",
+        "candidate": "an agent said so; nothing has checked it",
+        "stale": "evidence moved since it was recorded",
+        "superseded": "replaced by a later claim",
+        "promoted": "manually accepted by the orchestrator",
+    }
+    for name, n in sorted(statuses.items(), key=lambda kv: -kv[1]):
+        tone = "green" if name == "verified" else "yellow" if name == "candidate" else "dim"
+        bar.add_row(f"[{tone}]{name}[/{tone}]", str(n), meanings.get(name, ""))
+    console.print(bar)
+
+    if candidates:
+        share = 100 * candidates // max(claims_n, 1)
+        console.print(
+            f"[yellow]{candidates} of {claims_n} claims ({share}%) have never been "
+            f"verified[/yellow] - `am gate-targets` lists them by task"
+        )
+    if verified:
+        console.print(f"[green]{verified} verified[/green] by a gate run")
+
+    repos = repo.graph_repos()
+    if repos:
+        console.print()
+        console.print("[dim]corpora: " + ", ".join(r["repo"] for r in repos) + "[/dim]")
+    else:
+        console.print()
+        console.print("[dim]no code graph yet - run `am setup <repo>`[/dim]")
+    db.close()
+
+
 def main() -> None:
     app()
 
