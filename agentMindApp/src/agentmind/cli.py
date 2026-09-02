@@ -20,6 +20,7 @@ from .context import build_context, build_file_context, estimate_tokens
 from .gate import evaluate_task, graph_delta
 from .importer import import_snapshot
 from .resolver import build_graph, claim_evidence_files, resolve_claims
+from .router import POLICY, memory_gaps, recommend
 from .snapshot import take_snapshot
 from .sync import sync as run_sync
 from .workspace import locate_store, register, registered_workspaces
@@ -958,6 +959,103 @@ def sync(
     )
     for note in result.notes:
         console.print(f"  [yellow]note:[/yellow] {_fmt(note)}")
+    db.close()
+
+
+# -------------------------------------------------------------------- route
+@app.command()
+def route(
+    role: Optional[str] = typer.Argument(None, help="Role to advise on. Omit for all."),
+    root: Path = typer.Option(None, "--root"),
+) -> None:
+    """Where to send a task, and how much history stands behind that advice.
+
+    The recommendation is the documented policy made explicit. The evidence
+    column is what the recorded dispatches actually say about it. When they
+    disagree, that disagreement is the point.
+    """
+    db, repo = _open(root)
+    roles = [role] if role else sorted(POLICY)
+    unknown = [r for r in roles if r not in POLICY]
+    if unknown:
+        console.print(f"[red]unknown role[/red] {unknown[0]!r}")
+        console.print("  known: " + ", ".join(sorted(POLICY)))
+        db.close()
+        raise typer.Exit(2)
+
+    table = Table(title="routing advice", header_style="bold")
+    for col in ("role", "engine", "model", "effort", "budget", "runs", "evidence"):
+        table.add_column(col, overflow="fold")
+
+    warnings: list[tuple[str, str]] = []
+    for name in roles:
+        rec = recommend(repo, name)
+        ev = rec.evidence
+        tone = {"moderate": "green", "weak": "yellow"}.get(ev.confidence, "dim")
+        table.add_row(
+            name, rec.engine, rec.model, rec.effort, f"${rec.budget:.2f}",
+            str(ev.dispatches), f"[{tone}]{ev.confidence}[/{tone}]",
+        )
+        for text in rec.warnings:
+            warnings.append((name, text))
+        if rec.note:
+            warnings.append((name, f"[dim]{escape(rec.note)}[/dim]"))
+    console.print(table)
+
+    for name, text in warnings:
+        console.print(f"  [bold]{name}[/bold]: {text}")
+
+    console.print()
+    console.print(
+        "[dim]evidence is how many recorded dispatches back the rule, not a "
+        "measured outcome - nothing here tracks whether a task succeeded[/dim]"
+    )
+    db.close()
+
+
+# ----------------------------------------------------------------- coverage
+@app.command()
+def coverage(root: Path = typer.Option(None, "--root")) -> None:
+    """What the recorded history can and cannot answer.
+
+    Worth reading before trusting any analysis built on this table: the two
+    dispatch engines write different .meta shapes, so several columns exist
+    for only one of them.
+    """
+    db, repo = _open(root)
+
+    table = Table(title="dispatch record coverage", header_style="bold")
+    for col in ("field", "recorded", "of", "note"):
+        table.add_column(col, overflow="fold")
+    notes = {
+        "effort": "dispatch.sh only; agy writes no effort",
+        "budget_usd": "dispatch.sh only; agy has no --max-budget-usd",
+        "attempt": "dispatch.sh only",
+        "session_id": "dispatch.sh only",
+        "diffstat": "sidecar file, absent here",
+        "finished_at": "nothing records completion yet",
+    }
+    for field_name, n, total in repo.field_coverage():
+        share = 100 * n // max(total, 1)
+        tone = "green" if share > 80 else "yellow" if share > 30 else "red"
+        table.add_row(
+            field_name, f"[{tone}]{n}[/{tone}]", str(total), notes.get(field_name, "")
+        )
+    console.print(table)
+
+    gaps = memory_gaps(repo)
+    if gaps:
+        console.print()
+        console.print("[yellow]dispatches that remember nothing[/yellow]")
+        for gap in gaps:
+            console.print(
+                f"    {gap['role']} on {gap['engine']}: "
+                f"{gap['dispatches']} runs, 0 claims"
+            )
+        console.print(
+            "  [dim]those runs happened and found things; none of it reached the\n"
+            "  knowledge store, so the next task starts from nothing[/dim]"
+        )
     db.close()
 
 

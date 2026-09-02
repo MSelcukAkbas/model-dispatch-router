@@ -596,6 +596,55 @@ class Repository:
             )
         )
 
+    def tasks_for_role(
+        self, role: str, engine: str | None = None
+    ) -> list[sqlite3.Row]:
+        sql = "SELECT * FROM tasks WHERE role = ?"
+        params: list[Any] = [role]
+        if engine:
+            sql += " AND IFNULL(engine, 'claude') = ?"
+            params.append(engine)
+        return list(self._db.conn.execute(sql, params))
+
+    def claims_from_role(self, role: str, engine: str | None = None) -> int:
+        sql = (
+            "SELECT COUNT(*) FROM claims c JOIN tasks t ON t.task_id = c.source_task"
+            " WHERE t.role = ?"
+        )
+        params: list[Any] = [role]
+        if engine:
+            sql += " AND IFNULL(t.engine, 'claude') = ?"
+            params.append(engine)
+        return int(self._db.conn.execute(sql, params).fetchone()[0])
+
+    def role_engine_counts(self) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT role, IFNULL(engine, 'claude') AS engine, COUNT(*) AS n"
+                " FROM tasks WHERE role IS NOT NULL"
+                " GROUP BY role, IFNULL(engine, 'claude') ORDER BY n DESC"
+            )
+        )
+
+    def field_coverage(self) -> list[tuple[str, int, int]]:
+        """How much of the dispatch record is actually populated.
+
+        The two engines write different .meta shapes, so half the columns are
+        only ever filled by one of them. Anything reading this table for
+        analysis needs to know that before drawing a conclusion from it.
+        """
+        total = self.count_tasks()
+        out = []
+        for col in ("role", "engine", "account", "effort", "budget_usd",
+                    "attempt", "diffstat", "session_id", "finished_at"):
+            n = int(
+                self._db.conn.execute(
+                    f"SELECT COUNT(*) FROM tasks WHERE {col} IS NOT NULL"
+                ).fetchone()[0]
+            )
+            out.append((col, n, total))
+        return out
+
     def reason_counts(self) -> list[sqlite3.Row]:
         return list(
             self._db.conn.execute(

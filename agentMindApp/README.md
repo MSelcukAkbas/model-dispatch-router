@@ -82,6 +82,8 @@ am hot                                  # where agent attention has actually gon
 am why <file> --src <repo>              # what has been claimed here, still fresh?
 am dangling --reason file_missing       # claims stranded on deleted code
 am gate-targets                         # tasks holding unverified claims
+am route [role]                         # where to send a task, and on what evidence
+am coverage                             # what the record can and cannot answer
 am gate <task> --src <repo> --promote   # verify, and record it
 am bench "<task>" --repo <name> --src <repo>
 am prompt "<task>" --goal "..." --repo <name> --out prompt.txt
@@ -131,11 +133,28 @@ agentmind/                 repo root
 | L1 | Overlay graph — claims joined to code | done |
 | L2 | Token-budgeted context injection | done |
 | L3 | Verification gate | done |
-| L4 | Measured router | next — needs dispatch data to learn from |
-| L5 | TUI | after L4 |
+| L4 | Routing advice | done, but not "measured" — see below |
+| L5 | TUI | next |
 
-L4 is deliberately last of the working layers: routing that claims to be
-measured needs measurements, and those accumulate from L0 running for real.
+The plan called L4 a *measured* router. The recorded history does not support
+that word, so `am route` does not use it. It makes the existing policy explicit
+and reports how many dispatches stand behind each rule — `none`, `anecdotal`,
+`weak`, `moderate`, and deliberately nothing stronger. `am coverage` shows why:
+nothing yet records whether a task succeeded, and the two dispatch engines fill
+in different halves of the record.
+
+What the history does say clearly is about plumbing rather than model quality:
+
+```
+dispatches that remember nothing
+    research on agy: 59 runs, 0 claims
+    judge on agy:     8 runs, 0 claims
+```
+
+Two thirds of all dispatches produce no institutional memory at all, because
+the agent-bridge MCP server that carries `submit_result` is wired for Claude
+and `dispatch-agy.sh` has no per-task MCP config to attach it with. Those runs
+found things; none of it survived them.
 
 ## Testing
 
