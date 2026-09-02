@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentmind"
+version = "0.1.0"
+description = "Orchestration kernel: one event log, one overlay graph and token-budgeted context over model-dispatch, graphify and agentic-ssh-mcp"
+readme = "README.md"
+# Pinned below 3.13 on purpose: the graph extra pulls ~28 tree-sitter grammar
+# wheels, and the newest CPython (3.14 on this machine) does not have wheels
+# for all of them yet — a source build of those is a long, fragile detour.
+# uv provisions a project-local 3.12; the system interpreter is left alone.
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13.9",
+]
+
+[project.optional-dependencies]
+# graphify enters at Phase 1 (resolver/context). Kept out of the base install
+# so Phase 0 does not depend on those grammar wheels resolving.
+graph = ["graphifyy==0.9.53"]
+
+[project.scripts]
+am = "agentmind.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentmind"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
