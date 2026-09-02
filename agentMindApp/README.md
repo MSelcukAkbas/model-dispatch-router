@@ -43,23 +43,37 @@ cannot prevent that twice; a gate can.
 
 ## Install
 
+From the workspace root (the directory holding `agentMindApp/`):
+
 ```bash
-uv sync --extra graph --group dev
+uv tool install --editable "./agentMindApp[graph]"
 ```
 
-Python is pinned to 3.12 — the `graph` extra pulls 29 tree-sitter grammar
+That puts `am` on your PATH, so it works from any directory. `--editable`
+means source edits take effect immediately - without it, `uv tool install`
+reuses a cached wheel and a fix you just made silently does not ship.
+
+For working on the kernel itself, `uv sync --extra graph --group dev` inside
+`agentMindApp/` gives you the test environment.
+
+Python is pinned to 3.12 - the `graph` extra pulls 29 tree-sitter grammar
 wheels, and the newest CPython does not have wheels for all of them.
 
 ## Use
 
 ```bash
-uv run am setup ~/path/to/your-repo     # snapshot, import, extract, join
-uv run am status                        # everything at a glance
+am setup ~/path/to/your-repo     # snapshot, import, extract, join
+am status                        # everything at a glance
 ```
 
 `setup` is read-only on the source: it copies the dispatch history and
 knowledge store into `snapshots/`, and every later command reads that copy.
 Nothing in this tool writes to the repo it learns from.
+
+The store lives in `.agentmind/` at your workspace root, and `am` finds it by
+searching upward from wherever you are, the way git finds `.git`. A command
+that cannot find one says so and stops - it will not quietly create an empty
+database and report zero of everything.
 
 Then:
 

@@ -49,9 +49,32 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def find_store(start: Path | str | None = None) -> Path | None:
+    """Nearest existing am.db, searching upward like git looks for .git.
+
+    Without this, running `am` one directory away from the store silently
+    opened a brand-new empty database and reported zero of everything, which
+    reads as data loss rather than as a wrong working directory.
+    """
+    current = Path(start or Path.cwd()).expanduser().resolve()
+    for candidate in [current, *current.parents]:
+        db = candidate / DEFAULT_DB_RELPATH
+        if db.is_file():
+            return db
+    return None
+
+
 def resolve_db_path(root: Path | str | None = None) -> Path:
-    """Where am.db lives for a given project root (default: cwd)."""
-    return Path(root or Path.cwd()) / DEFAULT_DB_RELPATH
+    """Where am.db lives.
+
+    An explicit `root` always wins - scripts and tests must be able to name a
+    location. Otherwise use the nearest store above the working directory, and
+    fall back to creating one here when there is none.
+    """
+    if root is not None:
+        return Path(root) / DEFAULT_DB_RELPATH
+    found = find_store()
+    return found if found is not None else Path.cwd() / DEFAULT_DB_RELPATH
 
 
 class Database:

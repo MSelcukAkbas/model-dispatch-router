@@ -19,7 +19,7 @@ from .gate import evaluate_task, graph_delta
 from .importer import import_snapshot
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .snapshot import take_snapshot
-from .store import Database, Repository, resolve_db_path
+from .store import Database, Repository, find_store, resolve_db_path
 
 app = typer.Typer(
     add_completion=False,
@@ -29,7 +29,23 @@ app = typer.Typer(
 console = Console()
 
 
-def _open(root: Optional[Path] = None) -> tuple[Database, Repository]:
+def _open(
+    root: Optional[Path] = None, *, create: bool = False
+) -> tuple[Database, Repository]:
+    """Open the workspace store.
+
+    Only `init` and `setup` pass create=True. Every other command refuses to
+    conjure an empty database: silently creating one and then reporting zero
+    tasks and zero claims reads as data loss, when the real cause is standing
+    in the wrong directory.
+    """
+    if root is None and not create and find_store() is None:
+        console.print(
+            "[red]no AgentMind store found[/red] here or in any parent directory."
+        )
+        console.print("  run [bold]am setup <repo>[/bold] to create one, "
+                      "or pass --root <path> to point at an existing workspace.")
+        raise typer.Exit(2)
     db = Database(resolve_db_path(root))
     db.init_db()
     return db, Repository(db)
@@ -42,11 +58,12 @@ def _fmt(value: object) -> str:
 # --------------------------------------------------------------------- init
 @app.command()
 def init(
-    root: Path = typer.Option(Path.cwd(), "--root", help="Project root to initialise."),
+    root: Path = typer.Option(None, "--root", help="Where to create .agentmind (default: cwd)."),
 ) -> None:
     """Create .agentmind/am.db and apply the schema."""
-    db, repo = _open(root)
-    repo.add_event("kernel.init", actor="am init", payload={"root": str(root)})
+    target = Path(root) if root else Path.cwd()
+    db, repo = _open(target, create=True)
+    repo.add_event("kernel.init", actor="am init", payload={"root": str(target)})
     console.print(f"[green]initialised[/green] {db.path}")
     db.close()
 
@@ -59,7 +76,7 @@ def event(
     run_id: Optional[str] = typer.Option(None, "--run-id"),
     actor: Optional[str] = typer.Option(None, "--actor"),
     payload: Optional[str] = typer.Option(None, "--json", help="JSON object payload."),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Append one event. Never fails the caller.
 
@@ -86,10 +103,11 @@ def event(
 def snapshot(
     source: Path = typer.Argument(..., help="Live model-dispatch repo to read."),
     with_logs: bool = typer.Option(False, "--with-logs", help="Also copy *.json run logs."),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Copy a live repo's dispatch history here. Read-only on the source."""
-    result = take_snapshot(source, Path(root) / "snapshots", with_logs=with_logs)
+    base = Path(root) if root else (find_store().parent.parent if find_store() else Path.cwd())
+    result = take_snapshot(source, base / "snapshots", with_logs=with_logs)
     console.print(f"[green]snapshot[/green] {result.dest}")
     console.print(
         f"  agent-log files: {result.agent_log_files}   knowledge.db: {result.knowledge_db}"
@@ -102,7 +120,7 @@ def snapshot(
 @app.command("import")
 def import_cmd(
     snapshot_dir: Path = typer.Argument(..., help="snapshots/<stamp> directory."),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Load a snapshot into tasks/claims/events."""
     db, repo = _open(root)
@@ -124,7 +142,7 @@ def tasks(
     role: Optional[str] = typer.Option(None, "--role"),
     account: Optional[str] = typer.Option(None, "--account"),
     limit: int = typer.Option(30, "--limit"),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """List imported and live dispatches."""
     db, repo = _open(root)
@@ -156,7 +174,7 @@ def events(
     kind: Optional[str] = typer.Option(None, "--kind"),
     task_id: Optional[str] = typer.Option(None, "--task-id"),
     limit: int = typer.Option(20, "--limit"),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Show the tail of the event log."""
     db, repo = _open(root)
@@ -179,7 +197,7 @@ def claims(
     status: Optional[str] = typer.Option(None, "--status", help="candidate|verified|stale|superseded|promoted"),
     topic: Optional[str] = typer.Option(None, "--topic"),
     limit: int = typer.Option(20, "--limit"),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """List agent claims carried over from knowledge.db."""
     db, repo = _open(root)
@@ -198,7 +216,7 @@ def claims(
 
 # -------------------------------------------------------------------- stats
 @app.command()
-def stats(root: Path = typer.Option(Path.cwd(), "--root")) -> None:
+def stats(root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd).")) -> None:
     """Baseline summary — the data Phase 4's router will learn from."""
     db, repo = _open(root)
     console.print(
@@ -239,7 +257,7 @@ def graph_build(
         help="Only extract files the imported claims cite — for a monorepo where "
              "a full extraction is neither needed nor cheap.",
     ),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Extract a repo with graphify and store the graph. Read-only on the source."""
     db, repo = _open(root)
@@ -264,7 +282,7 @@ def graph_build(
 
 
 @graph_app.command("info")
-def graph_info(root: Path = typer.Option(Path.cwd(), "--root")) -> None:
+def graph_info(root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd).")) -> None:
     """Which corpora are stored and how big they are."""
     db, repo = _open(root)
     table = Table(title="code graphs", header_style="bold")
@@ -286,7 +304,7 @@ def resolve(
         help="Working tree the evidence paths are relative to. With it, a miss "
              "can say whether the file is gone or merely unparsed.",
     ),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Join claim evidence to graph nodes (rebuilds node_refs)."""
     db, repo = _open(root)
@@ -317,7 +335,7 @@ def why(
     src: Optional[Path] = typer.Option(
         None, "--src", help="Working tree to check evidence freshness against."
     ),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """What agents have claimed about this file, and whether it still holds."""
     from .freshness import evaluate
@@ -373,7 +391,7 @@ def dangling(
     reason: Optional[str] = typer.Option(
         None, "--reason", help="file_missing | not_extracted | unresolved"
     ),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Evidence pointing at code the graph has no node for — the code moved."""
     db, repo = _open(root)
@@ -419,7 +437,7 @@ def dangling(
 @app.command()
 def hot(
     limit: int = typer.Option(15, "--limit"),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Files the most claims point at — where agent attention has actually gone."""
     db, repo = _open(root)
@@ -440,7 +458,7 @@ def context(
     depth: int = typer.Option(2, "--depth", help="Hops to expand from the seeds."),
     budget: int = typer.Option(2000, "--budget", help="Approx token budget."),
     src: Optional[Path] = typer.Option(None, "--src", help="Tree for freshness checks."),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Print the graph context for a task - what a prompt would carry."""
     db, repo = _open(root)
@@ -469,7 +487,7 @@ def prompt(
     depth: int = typer.Option(2, "--depth"),
     budget: int = typer.Option(2000, "--budget"),
     out: Optional[Path] = typer.Option(None, "--out", help="Write to a file instead of stdout."),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Emit a dispatch.sh-ready prompt file.
 
@@ -524,7 +542,7 @@ def bench(
     src: Path = typer.Option(..., "--src", help="Working tree the files live in."),
     depth: int = typer.Option(2, "--depth"),
     budget: int = typer.Option(2000, "--budget"),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Measure graph context against the file-dump baseline, per task.
 
@@ -587,7 +605,7 @@ def gate(
     promote: bool = typer.Option(
         False, "--promote", help="On a full pass, move this task's candidates to verified."
     ),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Verify a task's claims. The only path from candidate to verified."""
     db, repo = _open(root)
@@ -619,7 +637,7 @@ def gate(
 @app.command("gate-targets")
 def gate_targets(
     limit: int = typer.Option(20, "--limit"),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Tasks holding unverified claims - the queue the gate exists to drain."""
     db, repo = _open(root)
@@ -639,7 +657,7 @@ def gate_targets(
 def graph_diff_cmd(
     repo_name: str = typer.Option(..., "--repo"),
     src: Path = typer.Option(..., "--src"),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Structural change between the stored graph and the tree as it is now.
 
@@ -664,16 +682,17 @@ def graph_diff_cmd(
 def setup(
     source: Path = typer.Argument(..., help="Live model-dispatch repo to learn from."),
     name: Optional[str] = typer.Option(None, "--name", help="Corpus name."),
-    root: Path = typer.Option(Path.cwd(), "--root"),
+    root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """One command: snapshot, import, build the graph, resolve. Read-only on the source."""
     from .resolver import build_graph, claim_evidence_files, resolve_claims
 
-    db, repo = _open(root)
+    target = Path(root) if root else (find_store().parent.parent if find_store() else Path.cwd())
+    db, repo = _open(target, create=True)
     corpus = name or Path(source).expanduser().resolve().name
 
     console.print("[bold]1/4[/bold] snapshotting (read-only)")
-    snap = take_snapshot(source, Path(root) / "snapshots")
+    snap = take_snapshot(source, Path(target) / "snapshots")
     console.print(f"      {snap.agent_log_files} log files, knowledge.db={snap.knowledge_db}")
 
     console.print("[bold]2/4[/bold] importing dispatch history and claims")
@@ -702,7 +721,7 @@ def setup(
 
 # ------------------------------------------------------------------- status
 @app.command()
-def status(root: Path = typer.Option(Path.cwd(), "--root")) -> None:
+def status(root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd).")) -> None:
     """Everything at a glance: history, memory, graph, and what is unverified."""
     db, repo = _open(root)
 

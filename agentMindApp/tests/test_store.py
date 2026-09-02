@@ -86,3 +86,36 @@ def test_task_stats_separates_agy_from_ambient_claude(tmp_path):
     rows = {(r["engine"], r["account"]): r["n"] for r in repo.task_stats()}
     assert rows == {("agy", "n/a"): 1, ("claude", "ambient"): 1, ("claude", "akb34"): 1}
     db.close()
+
+
+def test_find_store_walks_up_like_git_looks_for_dot_git(tmp_path):
+    """Running one directory away from the store must find it, not miss it."""
+    from agentmind.store import find_store
+
+    workspace = tmp_path / "workspace"
+    deep = workspace / "app" / "src" / "pkg"
+    deep.mkdir(parents=True)
+    Database(resolve_db_path(workspace)).init_db()
+
+    assert find_store(deep) == workspace / ".agentmind" / "am.db"
+    assert find_store(workspace) == workspace / ".agentmind" / "am.db"
+
+
+def test_find_store_returns_none_when_there_is_none(tmp_path):
+    from agentmind.store import find_store
+
+    empty = tmp_path / "nothing" / "here"
+    empty.mkdir(parents=True)
+    assert find_store(empty) is None
+
+
+def test_an_explicit_root_always_wins_over_the_search(tmp_path):
+    from agentmind.store import find_store, resolve_db_path as rdp
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    Database(rdp(workspace)).init_db()
+    other = tmp_path / "other"
+
+    assert rdp(other) == other / ".agentmind" / "am.db"
+    assert find_store(workspace) is not None
