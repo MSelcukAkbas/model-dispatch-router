@@ -80,7 +80,7 @@ def test_read_command_refuses_when_no_store_exists(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
 
-    result = runner.invoke(app, ["status", "--root", str(empty / "missing")])
+    result = runner.invoke(app, ["status", "--root", str(empty)])
 
-    # An explicit --root creates on demand; the refusal path is the searched one.
-    assert result.exit_code in (0, 2)
+    assert result.exit_code == 2
+    assert not (empty / ".agentmind").exists()

@@ -22,7 +22,15 @@ from .importer import import_snapshot
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .snapshot import take_snapshot
 from .sync import sync as run_sync
-from .store import Database, Repository, find_store, nearby_stores, resolve_db_path
+from .workspace import locate_store, register, registered_workspaces
+from .store import (
+    DEFAULT_DB_RELPATH,
+    Database,
+    Repository,
+    find_store,
+    nearby_stores,
+    resolve_db_path,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -53,23 +61,63 @@ def _open(
     tasks and zero claims reads as data loss, when the real cause is standing
     in the wrong directory.
     """
-    if root is None and not create and find_store() is None:
-        console.print(
-            "[red]no AgentMind store found[/red] here or in any parent directory."
-        )
-        nearby = nearby_stores()
-        if nearby:
-            console.print("  there is one just below you:")
-            for path in nearby:
-                console.print(f"    [bold]cd {path.name}[/bold]   "
-                              f"[dim]or: --root {path}[/dim]")
-        else:
-            console.print("  run [bold]am setup <repo>[/bold] to create one, "
-                          "or pass --root <path> to point at an existing workspace.")
+    if root is None:
+        located, _how = locate_store()
+        if located is not None:
+            root = located
+        elif not create:
+            _no_store()
+    elif not create and not (Path(root) / DEFAULT_DB_RELPATH).is_file():
+        # An explicit --root used to mean "create here if missing", which let a
+        # read command materialise a store inside whatever directory it was
+        # pointed at - including a repo this tool is only ever meant to read.
+        console.print(f"[red]no AgentMind store at[/red] {escape(str(root))}")
+        console.print("  run [bold]am setup <repo> --root <path>[/bold] to create one.")
         raise typer.Exit(2)
     db = Database(resolve_db_path(root))
     db.init_db()
     return db, Repository(db)
+
+
+def _no_store() -> None:
+    console.print(
+        "[red]no AgentMind store found[/red] here, above here, or in the "
+        "workspace registry."
+    )
+    nearby = nearby_stores()
+    if nearby:
+        console.print("  there is one just below you:")
+        for path in nearby:
+            console.print(f"    [bold]cd {path.name}[/bold]   "
+                          f"[dim]or: --root {path}[/dim]")
+    else:
+        console.print("  run [bold]am setup <repo>[/bold] to create one, "
+                      "or pass --root <path> to point at an existing workspace.")
+    raise typer.Exit(2)
+
+
+def _target(
+    repo: Repository, name: Optional[str], src: Optional[Path]
+) -> tuple[str, Path]:
+    """Work out which corpus and which source directory a command means.
+
+    The path was already given once, at setup. Making every later command ask
+    for it again is friction this tool put there itself, so a remembered
+    corpus fills in both.
+    """
+    row = repo.corpus(name) if name else repo.only_corpus()
+    if row is None:
+        known = [r["name"] for r in repo.corpora()]
+        if name:
+            console.print(f"[red]unknown corpus[/red] {name!r}")
+        elif known:
+            console.print("[red]several corpora here[/red] - name one with --repo:")
+            for entry in known:
+                console.print(f"    {entry}")
+        else:
+            console.print("[red]no corpus yet[/red] - run `am setup <repo>` first.")
+        raise typer.Exit(2)
+    return row["name"], Path(src) if src else Path(row["source_path"])
 
 
 def _fmt(value: object) -> str:
@@ -134,7 +182,9 @@ def snapshot(
     root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Copy a live repo's dispatch history here. Read-only on the source."""
-    base = Path(root) if root else (find_store().parent.parent if find_store() else Path.cwd())
+    db, repo = _open(root)
+    base = db.path.parent.parent
+    db.close()
     result = take_snapshot(source, base / "snapshots", with_logs=with_logs)
     console.print(f"[green]snapshot[/green] {result.dest}")
     console.print(
@@ -296,6 +346,7 @@ def graph_build(
         raise typer.Exit(1)
 
     result = build_graph(repo, source, repo_name=name, only_files=only)
+    repo.remember_corpus(result.repo, source)
     repo.add_event(
         "graph.built", actor="am graph build",
         payload={"repo": result.repo, "nodes": result.nodes, "edges": result.edges,
@@ -326,7 +377,7 @@ def graph_info(root: Path = typer.Option(None, "--root", help="Workspace root (d
 # ------------------------------------------------------------------ resolve
 @app.command()
 def resolve(
-    repo_name: str = typer.Option(..., "--repo", help="Corpus name from `am graph info`."),
+    repo_name: Optional[str] = typer.Option(None, "--repo", help="Corpus name."),
     src: Optional[Path] = typer.Option(
         None, "--src",
         help="Working tree the evidence paths are relative to. With it, a miss "
@@ -336,6 +387,7 @@ def resolve(
 ) -> None:
     """Join claim evidence to graph nodes (rebuilds node_refs)."""
     db, repo = _open(root)
+    repo_name, src = _target(repo, repo_name, src)
     result = resolve_claims(repo, repo_name, source_root=src)
     repo.add_event(
         "claims.resolved", actor="am resolve",
@@ -361,14 +413,17 @@ def resolve(
 def why(
     file: str = typer.Argument(..., help="Repo-relative path, e.g. app/jobs/manager.py"),
     src: Optional[Path] = typer.Option(
-        None, "--src", help="Working tree to check evidence freshness against."
+        None, "--src", help="Working tree for freshness (default: remembered)."
     ),
+    repo_name: Optional[str] = typer.Option(None, "--repo", help="Corpus name."),
     root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """What agents have claimed about this file, and whether it still holds."""
     from .freshness import evaluate
 
     db, repo = _open(root)
+    if src is None and repo.corpora():
+        _, src = _target(repo, repo_name, None)
     rows = repo.claims_for_file(file)
     if not rows:
         console.print(f"[yellow]no claims reference[/yellow] {escape(file)}")
@@ -482,7 +537,7 @@ def hot(
 @app.command()
 def context(
     query: str = typer.Argument(..., help="What the task is about."),
-    repo_name: str = typer.Option(..., "--repo", help="Corpus name."),
+    repo_name: Optional[str] = typer.Option(None, "--repo", help="Corpus name."),
     depth: int = typer.Option(2, "--depth", help="Hops to expand from the seeds."),
     budget: int = typer.Option(2000, "--budget", help="Approx token budget."),
     src: Optional[Path] = typer.Option(None, "--src", help="Tree for freshness checks."),
@@ -490,6 +545,7 @@ def context(
 ) -> None:
     """Print the graph context for a task - what a prompt would carry."""
     db, repo = _open(root)
+    repo_name, src = _target(repo, repo_name, src)
     result = build_context(repo, repo_name, query, depth=depth, budget=budget, src=src)
     if not result.text:
         console.print(f"[yellow]nothing in the graph matched[/yellow] {query!r}")
@@ -509,9 +565,9 @@ def context(
 def prompt(
     query: str = typer.Argument(..., help="What the task is about."),
     goal: str = typer.Option(..., "--goal", help="The one sentence for the # GOAL: header."),
-    repo_name: str = typer.Option(..., "--repo", help="Corpus name."),
+    repo_name: Optional[str] = typer.Option(None, "--repo", help="Corpus name."),
     mode: str = typer.Option("graph", "--mode", help="graph | files"),
-    src: Optional[Path] = typer.Option(None, "--src", help="Working tree (required for files mode)."),
+    src: Optional[Path] = typer.Option(None, "--src", help="Working tree (default: remembered)."),
     depth: int = typer.Option(2, "--depth"),
     budget: int = typer.Option(2000, "--budget"),
     out: Optional[Path] = typer.Option(None, "--out", help="Write to a file instead of stdout."),
@@ -526,11 +582,8 @@ def prompt(
     if mode not in ("graph", "files"):
         console.print("[red]--mode must be graph or files[/red]")
         raise typer.Exit(1)
-    if mode == "files" and src is None:
-        console.print("[red]files mode needs --src[/red]")
-        raise typer.Exit(1)
-
     db, repo = _open(root)
+    repo_name, src = _target(repo, repo_name, src)
     if mode == "graph":
         result = build_context(repo, repo_name, query, depth=depth, budget=budget, src=src)
     else:
@@ -566,8 +619,8 @@ def prompt(
 @app.command()
 def bench(
     queries: list[str] = typer.Argument(..., help="One or more task descriptions."),
-    repo_name: str = typer.Option(..., "--repo", help="Corpus name."),
-    src: Path = typer.Option(..., "--src", help="Working tree the files live in."),
+    repo_name: Optional[str] = typer.Option(None, "--repo", help="Corpus name."),
+    src: Optional[Path] = typer.Option(None, "--src", help="Working tree (default: remembered)."),
     depth: int = typer.Option(2, "--depth"),
     budget: int = typer.Option(2000, "--budget"),
     root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
@@ -579,6 +632,7 @@ def bench(
     scope.
     """
     db, repo = _open(root)
+    repo_name, src = _target(repo, repo_name, src)
     table = Table(title="prompt cost: files vs graph", header_style="bold")
     for col in ("task", "files", "files ~tok", "graph ~tok", "saved", "claims"):
         table.add_column(col, overflow="fold")
@@ -626,7 +680,10 @@ def bench(
 @app.command()
 def gate(
     task_id: str = typer.Argument(..., help="Task whose claims to verify."),
-    src: Path = typer.Option(..., "--src", help="Working tree the evidence lives in."),
+    src: Optional[Path] = typer.Option(
+        None, "--src", help="Working tree the evidence lives in (default: remembered)."
+    ),
+    repo_name: Optional[str] = typer.Option(None, "--repo", help="Corpus name."),
     check: Optional[str] = typer.Option(
         None, "--check", help="Project command that must exit zero, e.g. 'pytest -q'."
     ),
@@ -637,6 +694,7 @@ def gate(
 ) -> None:
     """Verify a task's claims. The only path from candidate to verified."""
     db, repo = _open(root)
+    _, src = _target(repo, repo_name, src)
     result = evaluate_task(repo, task_id, src, command=check, promote=promote)
 
     table = Table(title=f"gate: {task_id}", header_style="bold")
@@ -683,8 +741,8 @@ def gate_targets(
 
 @app.command("graph-diff")
 def graph_diff_cmd(
-    repo_name: str = typer.Option(..., "--repo"),
-    src: Path = typer.Option(..., "--src"),
+    repo_name: Optional[str] = typer.Option(None, "--repo"),
+    src: Optional[Path] = typer.Option(None, "--src"),
     root: Path = typer.Option(None, "--root", help="Workspace root (default: nearest .agentmind above cwd)."),
 ) -> None:
     """Structural change between the stored graph and the tree as it is now.
@@ -693,6 +751,7 @@ def graph_diff_cmd(
     moved far more than that.
     """
     db, repo = _open(root)
+    repo_name, src = _target(repo, repo_name, src)
     diff = graph_delta(repo, repo_name, src)
     table = Table(title=f"graph delta: {repo_name}", header_style="bold")
     table.add_column("metric")
@@ -715,7 +774,8 @@ def setup(
     """One command: snapshot, import, build the graph, resolve. Read-only on the source."""
     from .resolver import build_graph, claim_evidence_files, resolve_claims
 
-    target = Path(root) if root else (find_store().parent.parent if find_store() else Path.cwd())
+    located, _how = locate_store()
+    target = Path(root) if root else (located or Path.cwd())
     db, repo = _open(target, create=True)
     corpus = name or Path(source).expanduser().resolve().name
 
@@ -738,10 +798,15 @@ def setup(
     pct = (100 * resolved.resolved / resolved.refs) if resolved.refs else 0
     console.print(f"      {resolved.resolved}/{resolved.refs} refs bound ({pct:.0f}%)")
 
+    repo.remember_corpus(corpus, source)
+    repo.touch_corpus(corpus)
+    register(target)
+
     console.print()
     console.print(f"[green]ready[/green]  corpus=[bold]{corpus}[/bold]")
+    console.print("  am sync                       catch up after more work happens")
     console.print("  am hot                        where agent attention has gone")
-    console.print(f"  am why <file> --src {source}")
+    console.print("  am why <file>                 what is already known there")
     console.print("  am dangling --reason file_missing")
     console.print(f"  am bench \"<task>\" --repo {corpus} --src {source}")
     db.close()
@@ -816,7 +881,9 @@ def status(root: Path = typer.Option(None, "--root", help="Workspace root (defau
 # --------------------------------------------------------------------- sync
 @app.command()
 def sync(
-    source: Path = typer.Argument(..., help="Live repo to catch up with."),
+    source: Optional[Path] = typer.Argument(
+        None, help="Live repo to catch up with. Omit to use the remembered one."
+    ),
     name: Optional[str] = typer.Option(None, "--name", help="Corpus name."),
     keep_stale: bool = typer.Option(
         False, "--keep-stale",
@@ -829,11 +896,17 @@ def sync(
     Run this whenever you want the store current. It reads the repo and writes
     nothing to it, so the loop closes without a hook or a wrapper on that side.
     """
-    base = Path(root) if root else (
-        find_store().parent.parent if find_store() else Path.cwd()
+    db, repo = _open(root)
+    base = db.path.parent.parent
+    corpus_name, source_path = (
+        (name or Path(source).expanduser().resolve().name, Path(source))
+        if source else _target(repo, name, None)
     )
-    db, repo = _open(base)
-    result = run_sync(repo, source, base, corpus=name, mark_stale=not keep_stale)
+    result = run_sync(
+        repo, source_path, base, corpus=corpus_name, mark_stale=not keep_stale
+    )
+    repo.remember_corpus(result.corpus, source_path)
+    repo.touch_corpus(result.corpus)
 
     if not result.changed:
         console.print(f"[dim]already current[/dim]  corpus={result.corpus}")

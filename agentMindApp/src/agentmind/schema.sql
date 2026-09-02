@@ -134,3 +134,13 @@ CREATE TABLE IF NOT EXISTS graph_edges (
 );
 CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(repo, source);
 CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(repo, target);
+
+-- Which live repo each corpus came from, so the path is typed once at setup
+-- and never again. Also what lets `am` be run from inside the watched repo:
+-- the registry maps a source directory back to the workspace watching it.
+CREATE TABLE IF NOT EXISTS corpora (
+    name           TEXT PRIMARY KEY,
+    source_path    TEXT NOT NULL,
+    added_at       TEXT NOT NULL,
+    last_synced_at TEXT
+);

@@ -549,6 +549,36 @@ class Repository:
         )
         self._db.conn.commit()
 
+    # --------------------------------------------------------------- corpora
+    def remember_corpus(self, name: str, source_path: Path | str) -> None:
+        """Record where a corpus came from, so the path is typed once."""
+        self._db.conn.execute(
+            "INSERT INTO corpora (name, source_path, added_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(name) DO UPDATE SET source_path = excluded.source_path",
+            (name, str(Path(source_path).expanduser().resolve()), utcnow()),
+        )
+        self._db.conn.commit()
+
+    def touch_corpus(self, name: str) -> None:
+        self._db.conn.execute(
+            "UPDATE corpora SET last_synced_at = ? WHERE name = ?", (utcnow(), name)
+        )
+        self._db.conn.commit()
+
+    def corpora(self) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute("SELECT * FROM corpora ORDER BY name")
+        )
+
+    def corpus(self, name: str) -> sqlite3.Row | None:
+        return self._db.conn.execute(
+            "SELECT * FROM corpora WHERE name = ?", (name,)
+        ).fetchone()
+
+    def only_corpus(self) -> sqlite3.Row | None:
+        rows = self.corpora()
+        return rows[0] if len(rows) == 1 else None
+
     def drop_graph(self, repo_name: str) -> None:
         self._db.conn.execute("DELETE FROM graph_nodes WHERE repo = ?", (repo_name,))
         self._db.conn.execute("DELETE FROM graph_edges WHERE repo = ?", (repo_name,))
