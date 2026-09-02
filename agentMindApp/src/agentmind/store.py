@@ -264,11 +264,20 @@ class Repository:
             "commit_sha", "source_task", "source_role", "status",
             "verification_count", "supporting_tasks_json", "superseded_by",
             "created_at", "last_verified_commit", "last_verified_at", "origin",
+            "source_status",
         )
         row = _with_defaults(claim, CLAIM_DEFAULTS)
         values = [row.get(c) for c in cols]
         placeholders = ", ".join("?" for _ in cols)
-        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "id")
+        # These four are the gate's verdict, held here and nowhere else. The
+        # source knowledge store has no idea this kernel exists, so letting a
+        # re-import carry its `status` over ours would undo every verification
+        # on the next sync - which is exactly what it did before this line.
+        OURS = {"status", "verification_count", "last_verified_commit",
+                "last_verified_at"}
+        updates = ", ".join(
+            f"{c}=excluded.{c}" for c in cols if c != "id" and c not in OURS
+        )
         self._db.conn.execute(
             f"INSERT INTO claims ({', '.join(cols)}) VALUES ({placeholders})"
             f" ON CONFLICT(id) DO UPDATE SET {updates}",
@@ -504,6 +513,13 @@ class Repository:
             )
         )
 
+    def refs_for_claim(self, claim_id: int) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT * FROM node_refs WHERE claim_id = ?", (claim_id,)
+            )
+        )
+
     def promote_claim(self, claim_id: int, commit_sha: str | None = None) -> None:
         """candidate -> verified. Only the gate calls this.
 
@@ -517,6 +533,19 @@ class Repository:
             "       last_verified_commit = ?, last_verified_at = ?"
             " WHERE id = ? AND status = 'candidate'",
             (commit_sha, utcnow(), claim_id),
+        )
+        self._db.conn.commit()
+
+    def verified_claims(self) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT * FROM claims WHERE status = 'verified' ORDER BY id"
+            )
+        )
+
+    def set_claim_status(self, claim_id: int, status: str) -> None:
+        self._db.conn.execute(
+            "UPDATE claims SET status = ? WHERE id = ?", (status, claim_id)
         )
         self._db.conn.commit()
 

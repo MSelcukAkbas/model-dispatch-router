@@ -182,7 +182,10 @@ def import_knowledge(repo: Repository, db_path: Path, result: ImportResult) -> N
                 "commit_sha": data["commit_sha"],
                 "source_task": data["source_task"],
                 "source_role": data["source_role"],
+                # Our status on first insert; ignored on conflict so the gate's
+                # verdict survives. source_status keeps the origin's own view.
                 "status": data["status"] or "candidate",
+                "source_status": data["status"],
                 "verification_count": data["verification_count"] or 0,
                 "supporting_tasks_json": data["supporting_tasks"] or "[]",
                 "superseded_by": data["superseded_by"],

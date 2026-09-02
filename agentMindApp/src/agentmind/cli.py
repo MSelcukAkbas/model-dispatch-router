@@ -21,6 +21,7 @@ from .gate import evaluate_task, graph_delta
 from .importer import import_snapshot
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .snapshot import take_snapshot
+from .sync import sync as run_sync
 from .store import Database, Repository, find_store, nearby_stores, resolve_db_path
 
 app = typer.Typer(
@@ -809,6 +810,56 @@ def status(root: Path = typer.Option(None, "--root", help="Workspace root (defau
     else:
         console.print()
         console.print("[dim]no code graph yet - run `am setup <repo>`[/dim]")
+    db.close()
+
+
+# --------------------------------------------------------------------- sync
+@app.command()
+def sync(
+    source: Path = typer.Argument(..., help="Live repo to catch up with."),
+    name: Optional[str] = typer.Option(None, "--name", help="Corpus name."),
+    keep_stale: bool = typer.Option(
+        False, "--keep-stale",
+        help="Leave verified claims verified even if their evidence has moved.",
+    ),
+    root: Path = typer.Option(None, "--root"),
+) -> None:
+    """Catch up with a repo: new dispatches, new claims, moved code.
+
+    Run this whenever you want the store current. It reads the repo and writes
+    nothing to it, so the loop closes without a hook or a wrapper on that side.
+    """
+    base = Path(root) if root else (
+        find_store().parent.parent if find_store() else Path.cwd()
+    )
+    db, repo = _open(base)
+    result = run_sync(repo, source, base, corpus=name, mark_stale=not keep_stale)
+
+    if not result.changed:
+        console.print(f"[dim]already current[/dim]  corpus={result.corpus}")
+    else:
+        console.print(f"[green]synced[/green]  corpus={result.corpus}")
+        if result.new_tasks:
+            console.print(f"  +{result.new_tasks} dispatch(es)")
+        if result.new_claims:
+            console.print(f"  +{result.new_claims} claim(s)")
+        if result.new_files:
+            shown = ", ".join(_fmt(f) for f in result.new_files[:3])
+            more = f" (+{len(result.new_files) - 3} more)" if len(result.new_files) > 3 else ""
+            console.print(f"  +{len(result.new_files)} newly cited file(s): {shown}{more}")
+        if result.promoted_stale:
+            console.print(
+                f"  [yellow]{result.promoted_stale} verified claim(s) went stale[/yellow]"
+                " - their evidence moved since the gate ran"
+            )
+
+    pct = (100 * result.resolved / result.refs) if result.refs else 0
+    console.print(
+        f"  [dim]{result.nodes} nodes, {result.edges} edges, "
+        f"{result.resolved}/{result.refs} refs bound ({pct:.0f}%)[/dim]"
+    )
+    for note in result.notes:
+        console.print(f"  [yellow]note:[/yellow] {_fmt(note)}")
     db.close()
 
 

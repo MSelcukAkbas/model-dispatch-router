@@ -71,7 +71,11 @@ CREATE TABLE IF NOT EXISTS claims (
     created_at            TEXT NOT NULL,
     last_verified_commit  TEXT,
     last_verified_at      TEXT,
-    origin                TEXT NOT NULL DEFAULT 'import'
+    origin                TEXT NOT NULL DEFAULT 'import',
+    -- What knowledge.db says this claim's status is. `status` above is ours:
+    -- it is what the gate decided here, and a re-import must never overwrite
+    -- it, or every sync would silently undo every verification.
+    source_status         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_topic  ON claims(topic);
