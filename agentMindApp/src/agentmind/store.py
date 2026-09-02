@@ -441,6 +441,56 @@ class Repository:
         params.append(limit)
         return list(self._db.conn.execute(sql, params))
 
+    def claims_for_task(self, task_id: str) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT * FROM claims WHERE source_task = ? ORDER BY id",
+                (task_id,),
+            )
+        )
+
+    def refs_for_task(self, task_id: str) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT r.* FROM node_refs r JOIN claims c ON c.id = r.claim_id"
+                " WHERE c.source_task = ?",
+                (task_id,),
+            )
+        )
+
+    def promote_claim(self, claim_id: int, commit_sha: str | None = None) -> None:
+        """candidate -> verified. Only the gate calls this.
+
+        verification_count is incremented rather than set, so a claim confirmed
+        by several independent gate runs is distinguishable from one that
+        squeaked through once.
+        """
+        self._db.conn.execute(
+            "UPDATE claims SET status = 'verified',"
+            "       verification_count = verification_count + 1,"
+            "       last_verified_commit = ?, last_verified_at = ?"
+            " WHERE id = ? AND status = 'candidate'",
+            (commit_sha, utcnow(), claim_id),
+        )
+        self._db.conn.commit()
+
+    def drop_graph(self, repo_name: str) -> None:
+        self._db.conn.execute("DELETE FROM graph_nodes WHERE repo = ?", (repo_name,))
+        self._db.conn.execute("DELETE FROM graph_edges WHERE repo = ?", (repo_name,))
+        self._db.conn.commit()
+
+    def tasks_with_claims(self, limit: int = 50) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT source_task AS task_id, COUNT(*) AS claims,"
+                "       SUM(status = 'candidate') AS candidates,"
+                "       SUM(status = 'verified') AS verified"
+                " FROM claims WHERE source_task IS NOT NULL"
+                " GROUP BY source_task ORDER BY claims DESC LIMIT ?",
+                (limit,),
+            )
+        )
+
     def reason_counts(self) -> list[sqlite3.Row]:
         return list(
             self._db.conn.execute(

@@ -15,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .context import build_context, build_file_context, estimate_tokens
+from .gate import evaluate_task, graph_delta
 from .importer import import_snapshot
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .snapshot import take_snapshot
@@ -572,6 +573,130 @@ def bench(
         "[dim]token counts use graphify's ~3-chars-per-token estimate, "
         "identical for both modes[/dim]"
     )
+    db.close()
+
+
+# --------------------------------------------------------------------- gate
+@app.command()
+def gate(
+    task_id: str = typer.Argument(..., help="Task whose claims to verify."),
+    src: Path = typer.Option(..., "--src", help="Working tree the evidence lives in."),
+    check: Optional[str] = typer.Option(
+        None, "--check", help="Project command that must exit zero, e.g. 'pytest -q'."
+    ),
+    promote: bool = typer.Option(
+        False, "--promote", help="On a full pass, move this task's candidates to verified."
+    ),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Verify a task's claims. The only path from candidate to verified."""
+    db, repo = _open(root)
+    result = evaluate_task(repo, task_id, src, command=check, promote=promote)
+
+    table = Table(title=f"gate: {task_id}", header_style="bold")
+    table.add_column("check")
+    table.add_column("")
+    table.add_column("detail", overflow="fold")
+    for c in result.checks:
+        mark = "[green]pass[/green]" if c.ok else "[red]FAIL[/red]"
+        table.add_row(c.name, mark, c.detail)
+    console.print(table)
+
+    if result.passed:
+        console.print(f"[green]gate passed[/green] - {result.claims} claim(s)")
+        if promote:
+            console.print(f"  promoted {result.promoted} candidate(s) to verified")
+        else:
+            console.print("  [dim]add --promote to record that on the claims[/dim]")
+    else:
+        console.print(
+            f"[red]gate failed[/red] - {result.claims} claim(s) stay candidate"
+        )
+        raise typer.Exit(1)
+    db.close()
+
+
+@app.command("gate-targets")
+def gate_targets(
+    limit: int = typer.Option(20, "--limit"),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Tasks holding unverified claims - the queue the gate exists to drain."""
+    db, repo = _open(root)
+    table = Table(title="tasks with claims", header_style="bold")
+    for col in ("task", "claims", "candidate", "verified"):
+        table.add_column(col, overflow="fold")
+    for r in repo.tasks_with_claims(limit=limit):
+        table.add_row(
+            _fmt(r["task_id"]), str(r["claims"]),
+            _fmt(r["candidates"]), _fmt(r["verified"]),
+        )
+    console.print(table)
+    db.close()
+
+
+@app.command("graph-diff")
+def graph_diff_cmd(
+    repo_name: str = typer.Option(..., "--repo"),
+    src: Path = typer.Option(..., "--src"),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """Structural change between the stored graph and the tree as it is now.
+
+    This is what catches a report claiming one small edit when the structure
+    moved far more than that.
+    """
+    db, repo = _open(root)
+    diff = graph_delta(repo, repo_name, src)
+    table = Table(title=f"graph delta: {repo_name}", header_style="bold")
+    table.add_column("metric")
+    table.add_column("value", overflow="fold")
+    for key, value in diff.items():
+        if isinstance(value, list):
+            value = f"{len(value)}: " + ", ".join(str(v) for v in value[:5])
+        table.add_row(str(key), str(value))
+    console.print(table)
+    db.close()
+
+
+# -------------------------------------------------------------------- setup
+@app.command()
+def setup(
+    source: Path = typer.Argument(..., help="Live model-dispatch repo to learn from."),
+    name: Optional[str] = typer.Option(None, "--name", help="Corpus name."),
+    root: Path = typer.Option(Path.cwd(), "--root"),
+) -> None:
+    """One command: snapshot, import, build the graph, resolve. Read-only on the source."""
+    from .resolver import build_graph, claim_evidence_files, resolve_claims
+
+    db, repo = _open(root)
+    corpus = name or Path(source).expanduser().resolve().name
+
+    console.print("[bold]1/4[/bold] snapshotting (read-only)")
+    snap = take_snapshot(source, Path(root) / "snapshots")
+    console.print(f"      {snap.agent_log_files} log files, knowledge.db={snap.knowledge_db}")
+
+    console.print("[bold]2/4[/bold] importing dispatch history and claims")
+    imported = import_snapshot(repo, snap.dest)
+    console.print(f"      {imported.tasks} tasks, {imported.claims} claims")
+
+    console.print("[bold]3/4[/bold] extracting the code the claims cite")
+    built = build_graph(
+        repo, source, repo_name=corpus, only_files=claim_evidence_files(repo)
+    )
+    console.print(f"      {built.nodes} nodes, {built.edges} edges")
+
+    console.print("[bold]4/4[/bold] joining claims to the graph")
+    resolved = resolve_claims(repo, corpus, source_root=source)
+    pct = (100 * resolved.resolved / resolved.refs) if resolved.refs else 0
+    console.print(f"      {resolved.resolved}/{resolved.refs} refs bound ({pct:.0f}%)")
+
+    console.print()
+    console.print(f"[green]ready[/green]  corpus=[bold]{corpus}[/bold]")
+    console.print("  am hot                        where agent attention has gone")
+    console.print(f"  am why <file> --src {source}")
+    console.print("  am dangling --reason file_missing")
+    console.print(f"  am bench \"<task>\" --repo {corpus} --src {source}")
     db.close()
 
 
