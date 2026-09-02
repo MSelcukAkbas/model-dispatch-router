@@ -48,6 +48,12 @@ class ContextResult:
     edges: int = 0
     claims: int = 0
     files: list[str] = field(default_factory=list)
+    # Largest single file in a file-mode baseline, and its share of the total.
+    # A saving ratio is only as meaningful as the thing it is measured against:
+    # one enormous document in the match set produces a spectacular number that
+    # says more about that document than about this tool.
+    biggest_file: str = ""
+    biggest_share: int = 0
 
 
 def load_graph(repo: Repository, repo_name: str):
@@ -245,6 +251,7 @@ def build_file_context(
     )
     root = Path(src).expanduser().resolve()
     chunks = [f"## Files relevant to: {query}", ""]
+    sizes: dict[str, int] = {}
     for rel in graph_result.files:
         path = root / rel
         if not path.is_file():
@@ -253,11 +260,20 @@ def build_file_context(
             body = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        sizes[rel] = len(body)
         chunks += [f"### {rel}", "```", body, "```", ""]
     text = "\n".join(chunks)
+
+    biggest_file, biggest_share = "", 0
+    if sizes:
+        biggest_file = max(sizes, key=sizes.__getitem__)
+        biggest_share = 100 * sizes[biggest_file] // max(sum(sizes.values()), 1)
+
     return ContextResult(
         text=text,
         tokens=estimate_tokens(text),
         seeds=graph_result.seeds,
         files=graph_result.files,
+        biggest_file=biggest_file,
+        biggest_share=biggest_share,
     )

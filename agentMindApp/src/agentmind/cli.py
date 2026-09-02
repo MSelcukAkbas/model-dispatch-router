@@ -525,7 +525,10 @@ def hot(
     """Files the most claims point at — where agent attention has actually gone."""
     db, repo = _open(root)
     table = Table(title="most-cited files", header_style="bold")
-    for col in ("claims", "resolved", "file"):
+    # 'refs bound' counts citations, not claims - one claim often cites the
+    # same file at several lines, so it can exceed the claim count and the
+    # old 'resolved' header made that read as a contradiction.
+    for col in ("claims", "refs bound", "file"):
         table.add_column(col)
     for r in repo.hot_files(limit=limit):
         table.add_row(str(r["claims"]), _fmt(r["resolved"]), _fmt(r["file"]))
@@ -634,10 +637,12 @@ def bench(
     db, repo = _open(root)
     repo_name, src = _target(repo, repo_name, src)
     table = Table(title="prompt cost: files vs graph", header_style="bold")
-    for col in ("task", "files", "files ~tok", "graph ~tok", "saved", "claims"):
+    for col in ("task", "files", "files ~tok", "graph ~tok", "saved", "claims",
+                "largest file drives"):
         table.add_column(col, overflow="fold")
 
     total_files = total_graph = 0
+    skewed: list[tuple[str, str, int]] = []
     for query in queries:
         baseline = build_file_context(repo, repo_name, query, src, depth=depth)
         graph_ctx = build_context(
@@ -650,9 +655,20 @@ def bench(
         total_graph += graph_ctx.tokens
         saved = 100 - (100 * graph_ctx.tokens // max(baseline.tokens, 1))
         tone = "green" if saved > 0 else "red"
+        # Surfaced because a single huge file in the match set inflates the
+        # ratio on its own; without this the reader cannot tell a real result
+        # from one document's size.
+        driver = ""
+        if baseline.biggest_file:
+            skew = "yellow" if baseline.biggest_share >= 50 else "dim"
+            name = Path(baseline.biggest_file).name
+            driver = f"[{skew}]{baseline.biggest_share}% {escape(name)}[/{skew}]"
+            if baseline.biggest_share >= 50:
+                skewed.append((query, baseline.biggest_file, baseline.biggest_share))
         table.add_row(
             query[:28], str(len(baseline.files)), f"{baseline.tokens:,}",
             f"{graph_ctx.tokens:,}", f"[{tone}]{saved}%[/{tone}]", str(graph_ctx.claims),
+            driver,
         )
 
     console.print(table)
@@ -669,6 +685,15 @@ def bench(
                      "files_tokens": total_files, "graph_tokens": total_graph,
                      "saved_pct": overall},
         )
+    if skewed:
+        console.print()
+        console.print(
+            "[yellow]read these with care[/yellow] - in the runs below, one file is "
+            "most of the baseline, so the ratio measures that file's size as much "
+            "as this tool:"
+        )
+        for query, path, share in skewed:
+            console.print(f"    {escape(query[:28])}: {share}% is {escape(path)}")
     console.print(
         "[dim]token counts use graphify's ~3-chars-per-token estimate, "
         "identical for both modes[/dim]"
