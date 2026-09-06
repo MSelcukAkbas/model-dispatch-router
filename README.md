@@ -48,3 +48,22 @@ uv run pytest -q
 
 Kurulum ve komutlar için [uygulama README'sine](skills/model-dispatch/mcp/agentmind/README.md), mevcut
 durum ve teknik kararlar için [durum dokümanına](docs/AGENTMIND_STATE.md) bakın.
+
+## Lisans ve dağıtım
+
+Bu depo bilinçli olarak **kapalıdır**: açık kaynak lisansı yoktur, tüm haklar
+saklıdır (bkz. `LICENSE`). Bu bir eksiklik değil, tercih — dahili bir araç
+olarak tutuluyor. Sonradan açılmak istenirse `LICENSE` dosyasını MIT veya
+Apache-2.0 ile değiştirmek yeterli.
+
+Uzak depo (remote) da bilinçli olarak kurulmamıştır. `.github/workflows/ci.yml`
+hazır bekler ve push edildiği gün çalışır; o güne kadar aynı iki kontrol
+yerelde koşturulabilir:
+
+```bash
+cd skills/model-dispatch/mcp/agentmind && uv run pytest -q   # birim testleri
+bash scripts/smoke-test.sh                                   # taze kurulum
+```
+
+Linux tarafı Docker ile önceden doğrulanmıştır; komut `scripts/smoke-test.sh`
+başlığındadır.
