@@ -13,6 +13,18 @@ from .lifecycle import _corpus, _open_runtime, session_start
 from .gate import evaluate_task, run_command
 from .sync import sync as run_sync
 
+# `am` fixes this in cli.py, but a console script is its own entry point and
+# inherits none of that. The text this hook forwards is graphify's and the
+# claim store's, which carries em-dashes and arrows; on a console using a
+# legacy code page they arrive at the coding host as mojibake, inside the very
+# context block the host is about to read.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):  # not a real stream
+        pass
+
+
 _START_HANDLER = {
     "type": "command",
     "command": "agentmind-hook start",
