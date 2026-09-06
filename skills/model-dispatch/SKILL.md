@@ -148,6 +148,109 @@ Both directions are also available as plain commands (`am session-start`,
 8. Commit or push only when the user authorized those actions. Clean up the worktree
    with `cleanup.sh TASK` after the result is safely retained.
 
+## The scripts, and what each one is for
+
+Everything lives in `skills/model-dispatch/scripts/`. Run them from the
+repository root. Only the first group starts work; the rest observe, review,
+or recover.
+
+**Start work**
+
+| script | usage |
+|---|---|
+| `dispatch.sh` | `ROLE TASK PROMPT [MINUTES] [EFFORT] [BUDGET] [ACCOUNT] [NO_WORKTREE]` — launches a headless session in its own worktree, returns immediately |
+| `dispatch-agy.sh` | `<research\|judge\|coder> TASK PROMPT [MINUTES] [MODEL]` — a second engine on a separate quota pool, for the read-only roles plus a catch-all writer. Not a drop-in replacement: it has no per-task tool allowlist, so writing roles stay on `dispatch.sh` |
+| `new-id.sh` | prints the next `T-NNNNNN` identifier, for work with no ticket of its own |
+
+**Watch it**
+
+| script | usage |
+|---|---|
+| `status.sh TASK` | one task's current state — this is the primary signal, and its exit code carries the answer |
+| `wait.sh TASK [TASK…]` | blocks until every named task finishes; exits 0 only if all of them exited 0 |
+| `list.sh` | inventory of every task the workspace knows about |
+| `collect.sh TASK` | the structured result and cost once a task is done |
+
+**Review and apply**
+
+| script | usage |
+|---|---|
+| `diff.sh TASK` | the worktree's changes, read-only — never skip this |
+| `apply.sh TASK` | copies the reviewed changes into the main checkout. Writes no commit, makes no push |
+| `verify.sh` | the repository's own validation pass over what was applied |
+
+**Recover and clean up**
+
+| script | usage |
+|---|---|
+| `resume.sh TASK [MINUTES] [EFFORT] [BUDGET]` | re-dispatches a task that stopped for a recoverable reason, reusing its recorded role, prompt and account |
+| `cleanup.sh TASK` | removes one task's worktree and branch after the result is safely retained |
+| `cleanup-all.sh --yes TASK [TASK…]` | the same for several, and it requires `--yes` on purpose |
+
+**Quota and capacity**
+
+| script | usage |
+|---|---|
+| `health.sh [ACCOUNT]` | preflight before dispatching — check this rather than discovering the problem mid-run |
+| `usage.sh [--raw] [ACCOUNT]` | current consumption for one account |
+| `wait-quota.sh [ACCOUNT] [MAX_PCT] [POLL_S]` | blocks until an account drops below a utilisation threshold |
+| `quota-watch.sh [ACCOUNT] [POLL_S]` | continuous monitoring |
+| `context-usage.sh SESSION_ID [MAX_TOKENS] [ACCOUNT]` | how much context a specific session has consumed |
+
+## Exit codes are the contract
+
+These scripts are meant to be driven programmatically, so the exit code — not
+the printed text — is what you branch on. Each distinct code means a different
+response is correct.
+
+`dispatch.sh`:
+
+| code | meaning | what to do |
+|---|---|---|
+| 0 | dispatched | proceed to monitoring |
+| 1 | bad usage or missing files | fix the invocation |
+| 12 | file conflict with a running task | serialize, or narrow `# FILES:` |
+| 15 | quota too high to dispatch safely | `wait-quota.sh`, or use another account |
+| 19 | refused: no-progress budget clamp exhausted | **a human looks at this**, not another retry |
+
+`status.sh`:
+
+| code | meaning | what to do |
+|---|---|---|
+| 0 | finished successfully | `collect.sh`, then `diff.sh` |
+| 10 | still running | keep waiting |
+| 11 | not found | check the identifier |
+| 14 | timed out | `resume.sh` with more minutes |
+| 17 | quota exhausted mid-run | not a task defect — reschedule |
+| 20 | hit the per-task budget cap | runaway-spend guard; inspect before resuming |
+
+`resume.sh`: `0` re-dispatched · `11` unknown task · `18` not in a resumable
+state (still running, or it never failed) · `19` the clamp refused it again.
+
+`collect.sh`: `0` result ready · `10` still running · `11` not found.
+
+Codes 19 and 20 both mean *stop and look*. They exist because a task that
+makes no progress across attempts will happily consume budget forever if
+something keeps auto-retrying it; the clamp halves the budget on each
+unproductive attempt and then refuses outright.
+
+## Two safety mechanisms you should know are there
+
+**The budget clamp.** Each attempt at a task is measured against the last one.
+An attempt that produced no worktree progress gets a halved budget next time,
+and eventually a refusal (exit 19) instead of another run. This is why
+`resume.sh` is the right way to retry — it carries the recorded state forward
+rather than resetting the counter that protects you.
+
+**The result Stop hook.** Roles with Bridge access are blocked from ending
+their turn until they call `submit_result`, so a finished task normally leaves
+a structured result and its findings behind rather than a transcript someone
+has to read. The block is bounded, not absolute: after a few refusals the hook
+gives up, lets the session end, and drops a `result-missing` marker in
+`.agent-logs/` instead of looping forever. So a task can still finish with no
+result — treat that marker as a failed run whose output must be recovered by
+hand, not as a quirk to work around.
+
 ## Role selection
 
 Use the narrowest configured role that fits. Built-in defaults cover `backend`,
