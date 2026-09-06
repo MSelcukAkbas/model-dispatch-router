@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: tests (${{ matrix.os }})
+    # Both, deliberately. Everything here was developed on Windows, so Linux is
+    # the platform most likely to expose an assumption nobody made on purpose.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: skills/model-dispatch/mcp/agentmind
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install with the graph extra
+        run: uv sync --extra graph --group dev
+      - name: Run the unit suite
+        run: uv run pytest -q
+
+  onboarding:
+    name: fresh-install smoke test (${{ matrix.os }})
+    # The unit suite runs inside an environment that is already correct. This
+    # job is the one that meets the tool the way a new user does, which is
+    # where every onboarding failure found so far actually lived.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # git ls-files and git grep checks need the real index, and the
+          # sample repositories the script builds need git identity to commit.
+          fetch-depth: 1
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Run the smoke test
+        shell: bash
+        run: bash scripts/smoke-test.sh
