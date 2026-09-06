@@ -39,3 +39,9 @@ build/
 
 # --- Editor-local state ----------------------------------------------------
 .vscode/
+# Hook installs are machine-local: `am hooks-install` writes these, and they
+# name a command (agentmind-hook) that only exists once this package is
+# installed. Committing them hands every clone a SessionStart hook pointing at
+# a binary that clone does not have.
+.claude/settings.json
+.codex/hooks.json

@@ -86,9 +86,14 @@ Do not commit machine-specific account registries or secret-bearing MCP configs.
 Install AgentMind once, then enable lifecycle hooks for either or both hosts:
 
 ```sh
-pipx install ./skills/model-dispatch/mcp/agentmind
+uv tool install --editable "./skills/model-dispatch/mcp/agentmind[graph]"
 am hooks-install . --platform all
 ```
+
+The `[graph]` extra is not optional in practice: without it the store still
+records tasks and claims, but every command that reads the code graph —
+`am context`, `am prompt`, `am why`, `am setup`'s extraction step — has
+nothing to read. Install it unless you specifically want a memory-only store.
 
 Codex reads `.codex/hooks.json`; Claude Code reads `.claude/settings.json`. Both call
 the same platform-neutral hook executable. On first session start, AgentMind creates

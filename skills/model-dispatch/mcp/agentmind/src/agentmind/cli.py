@@ -650,7 +650,16 @@ def context(
     """Print the graph context for a task - what a prompt would carry."""
     db, repo = _open(root)
     repo_name, src = _target(repo, repo_name, src)
-    result = build_context(repo, repo_name, query, depth=depth, budget=budget, src=src)
+    try:
+        result = build_context(
+            repo, repo_name, query, depth=depth, budget=budget, src=src
+        )
+    except RuntimeError as exc:
+        # A missing optional dependency is a setup problem with a known fix,
+        # not a crash the reader should have to decode from a traceback.
+        console.print(f"[red]{escape(str(exc))}[/red]")
+        db.close()
+        raise typer.Exit(2)
     if not result.text:
         console.print(f"[yellow]nothing in the graph matched[/yellow] {query!r}")
         db.close()
@@ -914,10 +923,25 @@ def setup(
     console.print(f"      {imported.tasks} tasks, {imported.claims} claims")
 
     console.print("[bold]3/4[/bold] extracting the code the claims cite")
-    built = build_graph(
-        repo, source, repo_name=corpus, only_files=claim_evidence_files(repo)
-    )
-    console.print(f"      {built.nodes} nodes, {built.edges} edges")
+    # Check the precondition rather than discovering it three commands later:
+    # without the graph extra, extraction silently produces nothing and the
+    # first `am context` fails with a traceback instead of an explanation.
+    graph_ready = True
+    try:
+        from .codegraph import _require_graphify
+
+        _require_graphify()
+    except RuntimeError as exc:
+        graph_ready = False
+        console.print(f"      [yellow]skipped:[/yellow] {escape(str(exc))}")
+        built = None
+    if graph_ready:
+        built = build_graph(
+            repo, source, repo_name=corpus, only_files=claim_evidence_files(repo)
+        )
+        console.print(f"      {built.nodes} nodes, {built.edges} edges")
+        for note in built.notes:
+            console.print(f"      [dim]{escape(note)}[/dim]")
 
     console.print("[bold]4/4[/bold] joining claims to the graph")
     resolved = resolve_claims(repo, corpus, source_root=source)
@@ -929,7 +953,31 @@ def setup(
     register(target)
 
     console.print()
-    console.print(f"[green]ready[/green]  corpus=[bold]{corpus}[/bold]")
+    nodes, _edges = repo.count_graph(corpus)
+    if not graph_ready:
+        console.print(
+            f"[yellow]partial[/yellow]  corpus=[bold]{corpus}[/bold] — "
+            "history and claims are stored, but there is no code graph"
+        )
+        # escape(): "[graph]" is the literal extra name and rich would parse it
+        # as a style tag and drop it, leaving an install command that does not
+        # install the thing this message is about.
+        console.print(
+            "  install the graph extra, then re-run: "
+            + escape('uv tool install --editable "<path-to>/agentmind[graph]"')
+        )
+    elif nodes == 0:
+        console.print(
+            f"[yellow]ready, but empty[/yellow]  corpus=[bold]{corpus}[/bold] — "
+            "nothing was extracted"
+        )
+        console.print(
+            "  the graph is built from files existing claims cite, so a repository "
+            "with no prior dispatch history starts with none. It fills in as work "
+            "runs; `am sync` picks up each new claim's files."
+        )
+    else:
+        console.print(f"[green]ready[/green]  corpus=[bold]{corpus}[/bold]")
     console.print("  am sync                       catch up after more work happens")
     console.print("  am hot                        where agent attention has gone")
     console.print("  am why <file>                 what is already known there")
