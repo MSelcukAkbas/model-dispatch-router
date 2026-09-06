@@ -13,6 +13,20 @@
 # have on PATH.
 #
 # Usage: scripts/smoke-test.sh
+#
+# To run it against Linux from a Windows machine, without waiting for CI:
+#
+#   docker run --rm -v "$PWD:/src:ro" ghcr.io/astral-sh/uv:python3.12-bookworm-slim \
+#     bash -c 'apt-get update -qq && apt-get install -y -qq git &&
+#              cp -r /src /work && cd /work &&
+#              rm -rf skills/model-dispatch/mcp/agentmind/.venv &&
+#              git config --global user.email ci@example.invalid &&
+#              git config --global user.name ci &&
+#              git config --global --add safe.directory /work &&
+#              bash scripts/smoke-test.sh'
+#
+# The copy matters: it leaves the mounted checkout read-only, so a run cannot
+# disturb the working tree it is testing.
 set -euo pipefail
 
 APP="skills/model-dispatch/mcp/agentmind"
