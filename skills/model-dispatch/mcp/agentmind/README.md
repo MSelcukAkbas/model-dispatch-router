@@ -43,10 +43,10 @@ cannot prevent that twice; a gate can.
 
 ## Install
 
-From the workspace root (the directory holding `agentMindApp/`):
+From the workspace root:
 
 ```bash
-uv tool install --editable "./agentMindApp[graph]"
+uv tool install --editable "./skills/model-dispatch/mcp/agentmind[graph]"
 ```
 
 That puts `am` on your PATH, so it works from any directory. `--editable`
@@ -54,7 +54,7 @@ means source edits take effect immediately - without it, `uv tool install`
 reuses a cached wheel and a fix you just made silently does not ship.
 
 For working on the kernel itself, `uv sync --extra graph --group dev` inside
-`agentMindApp/` gives you the test environment.
+`skills/model-dispatch/mcp/agentmind/` gives you the test environment.
 
 Python is pinned to 3.12 - the `graph` extra pulls 29 tree-sitter grammar
 wheels, and the newest CPython does not have wheels for all of them.
@@ -117,12 +117,12 @@ a rebase fails rather than sliding through.
 ## Layout
 
 ```
-agentmind/                 repo root
-├── agentMindApp/          this package — all kernel code
-├── agentic-ssh-mcp/       reference: the SSH MCP service
-├── graphify/              reference: upstream clone. The dependency is the
-│                          pinned PyPI package, not this directory
-└── miras.claude/          reference: model-dispatch skill and personas
+agentmind/                                  repo root
+├── skills/model-dispatch/                orchestration skill
+│   ├── mcp/bridge/                       live agent bridge
+│   └── mcp/agentmind/                    this Python package
+├── docs/                                  project state and research notes
+└── references/                            read-only source material
 ```
 
 ## Layers

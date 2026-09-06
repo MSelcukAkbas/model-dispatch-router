@@ -1,17 +1,20 @@
 # --- SECRETS ---------------------------------------------------------------
-# miras.claude carries a plaintext DeepSeek API key in two places:
+# references/miras.claude carries a plaintext DeepSeek API key in two places:
 #   skills/model-dispatch/scripts/accounts.sh  (ACCOUNT_ANTHROPIC_AUTH_TOKEN)
 #   claude-deepseek.bat                        (ANTHROPIC_AUTH_TOKEN)
 # Never track these. Ignoring them here does NOT make the key safe — it is
 # still in plaintext on disk and must be rotated and moved to an env var.
-miras.claude/
-miras.remember/
+references/miras.claude/
+references/miras.remember/
 
 # --- Reference clones (each carries its own .git) ---------------------------
 # Consumed as dependencies/read-only references, not as source of this repo.
-graphify/
-agentic-ssh-mcp/
-.agent/
+references/graphify/
+references/agentic-ssh-mcp/
+references/.agent/
+
+# Local model-dispatch account registry can contain plaintext credentials.
+skills/model-dispatch/scripts/accounts.sh
 
 # --- Runtime state ----------------------------------------------------------
 .agentmind/
@@ -33,3 +36,6 @@ build/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+
+# --- Editor-local state ----------------------------------------------------
+.vscode/

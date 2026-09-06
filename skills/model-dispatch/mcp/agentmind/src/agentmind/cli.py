@@ -19,6 +19,7 @@ from rich.table import Table
 from .context import build_context, build_file_context, estimate_tokens
 from .gate import evaluate_task, graph_delta
 from .importer import import_snapshot
+from .lifecycle import session_finish, session_start
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .router import POLICY, memory_gaps, recommend
 from .snapshot import take_snapshot
@@ -173,6 +174,94 @@ def event(
         console.print(f"[dim]event {event_id} {kind}[/dim]")
     except Exception as exc:  # fail-open by design
         console.print(f"[yellow]am event failed (ignored):[/yellow] {exc}", style="dim")
+
+
+# --------------------------------------------------------- dispatch lifecycle
+@app.command("session-start")
+def session_start_cmd(
+    task_id: str = typer.Argument(...),
+    role: str = typer.Option(..., "--role"),
+    source: Path = typer.Option(..., "--src"),
+    query: str = typer.Option(..., "--query"),
+    out: Path = typer.Option(..., "--out"),
+    repo_name: Optional[str] = typer.Option(None, "--repo"),
+    budget: int = typer.Option(2000, "--budget"),
+    root: Path = typer.Option(None, "--root"),
+) -> None:
+    """Prepare dispatch context. Fail-open so memory never blocks execution."""
+    try:
+        result = session_start(
+            task_id,
+            role,
+            query,
+            source,
+            root=root,
+            repo_name=repo_name,
+            budget=budget,
+        )
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(result["context"], encoding="utf-8")
+        console.print(
+            f"[dim]AgentMind context: {result['tokens']} tokens, "
+            f"{result['claims']} claims[/dim]"
+        )
+        if result["sync_error"]:
+            console.print(
+                f"[yellow]AgentMind sync warning:[/yellow] {result['sync_error']}",
+                style="dim",
+            )
+        if result["context_error"]:
+            console.print(
+                f"[yellow]AgentMind context warning:[/yellow] "
+                f"{result['context_error']}",
+                style="dim",
+            )
+    except Exception as exc:
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text("", encoding="utf-8")
+        except OSError:
+            pass
+        console.print(
+            f"[yellow]AgentMind session-start failed (ignored):[/yellow] {exc}",
+            style="dim",
+        )
+
+
+@app.command("session-end")
+def session_end_cmd(
+    task_id: str = typer.Argument(...),
+    role: str = typer.Option(..., "--role"),
+    source: Path = typer.Option(..., "--src"),
+    exit_code: int = typer.Option(..., "--exit-code"),
+    status_name: Optional[str] = typer.Option(None, "--status"),
+    repo_name: Optional[str] = typer.Option(None, "--repo"),
+    root: Path = typer.Option(None, "--root"),
+) -> None:
+    """Ingest a dispatch result. Fail-open so bookkeeping never masks exit."""
+    try:
+        result = session_finish(
+            task_id,
+            role,
+            source,
+            exit_code=exit_code,
+            status=status_name,
+            root=root,
+            repo_name=repo_name,
+        )
+        console.print(
+            f"[dim]AgentMind session recorded: {result['status']}[/dim]"
+        )
+        if result["sync_error"]:
+            console.print(
+                f"[yellow]AgentMind sync warning:[/yellow] {result['sync_error']}",
+                style="dim",
+            )
+    except Exception as exc:
+        console.print(
+            f"[yellow]AgentMind session-end failed (ignored):[/yellow] {exc}",
+            style="dim",
+        )
 
 
 # ----------------------------------------------------------------- snapshot

@@ -15,6 +15,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "typer>=0.15",
     "rich>=13.9",
+    "mcp>=2,<3",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ graph = ["graphifyy[sql]==0.9.53"]
 
 [project.scripts]
 am = "agentmind.cli:main"
+agentmind-mcp = "agentmind.server.main:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
