@@ -29,15 +29,14 @@ POLICY: dict[str, dict[str, object]] = {
     "backend": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 1.50},
     "design": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 2.50},
     "sdk": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 2.00,
-            "note": "sdks/ is a nested gitignored repo - dispatch with no-worktree=1"},
+            "note": "use no-worktree only for untracked or nested repositories"},
     "general": {"engine": "claude", "model": "sonnet", "effort": "medium", "budget": 1.00},
     "ops": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 2.00,
             "note": "only role with ssh-mcp; SSH command content is not filtered"},
     "research": {"engine": "agy", "model": "gemini", "effort": "low", "budget": 0.50,
-                 "note": "agy first by user decision (2026-08-27) - its quota is "
-                         "separate from every Claude account"},
+                 "note": "read-only evidence gathering"},
     "judge": {"engine": "agy", "model": "gemini", "effort": "high", "budget": 4.00,
-              "note": "agy first; falls back to Claude opus"},
+              "note": "read-only independent evaluation"},
 }
 
 # How much history a rule needs before its numbers mean anything. Deliberately

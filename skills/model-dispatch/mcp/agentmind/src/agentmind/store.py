@@ -109,6 +109,7 @@ class Database:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self._path)
         self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
@@ -575,6 +576,21 @@ class Repository:
             "SELECT * FROM corpora WHERE name = ?", (name,)
         ).fetchone()
 
+    def corpus_for_source(self, source_path: Path | str) -> sqlite3.Row | None:
+        """Return the most specific corpus owning ``source_path``.
+
+        Corpus names are labels; the canonical identity is the resolved source
+        directory. Matching by path prevents an unrelated single corpus from
+        being selected merely because it is the only row in the database.
+        """
+        target = Path(source_path).expanduser().resolve()
+        matches: list[tuple[int, sqlite3.Row]] = []
+        for row in self.corpora():
+            root = Path(str(row["source_path"])).expanduser().resolve()
+            if target == root or root in target.parents:
+                matches.append((len(root.parts), row))
+        return max(matches, key=lambda item: item[0])[1] if matches else None
+
     def only_corpus(self) -> sqlite3.Row | None:
         rows = self.corpora()
         return rows[0] if len(rows) == 1 else None
@@ -595,6 +611,16 @@ class Repository:
                 (limit,),
             )
         )
+
+    def anchor_candidate_claims(self, task_id: str, commit_sha: str) -> int:
+        """Attach a task's candidate evidence to a verified clean commit."""
+        cursor = self._db.conn.execute(
+            "UPDATE claims SET commit_sha = ?"
+            " WHERE source_task = ? AND status = 'candidate'",
+            (commit_sha, task_id),
+        )
+        self._db.conn.commit()
+        return int(cursor.rowcount)
 
     def tasks_for_role(
         self, role: str, engine: str | None = None

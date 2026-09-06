@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage: new-id.sh
 # Allocates and prints the next T-NNNNNN task ID. Only use this for ad-hoc
-# work with no existing ticket — if the task closes a KYC-/FE-/PLT-/SDK-
+# work with no existing ticket — if the task closes an existing issue or ticket,
 # ticket, use that ticket ID as the task-id instead (it's already the
 # project's immutable identifier, no need for a second ID space).
 set -euo pipefail

@@ -19,8 +19,6 @@ from ..lifecycle import (
     _corpus,
     _open_runtime,
     memory_status,
-    session_finish,
-    session_start,
 )
 
 mcp = MCPServer("agentmind")
@@ -49,7 +47,7 @@ def memory_context(
     src = _source(source_path)
     _, db, repo = _open_runtime(src)
     try:
-        corpus = _corpus(repo, repo_name)
+        corpus = _corpus(repo, repo_name, src)
         result = build_context(repo, corpus, query, budget=budget, src=src)
         return {
             "context": result.text,
@@ -77,42 +75,6 @@ def memory_for_file(file: str, source_path: str | None = None) -> dict[str, Any]
         return {"file": file, "claims": claims}
     finally:
         db.close()
-
-
-@mcp.tool()
-def dispatch_session_start(
-    task_id: str,
-    role: str,
-    query: str,
-    source_path: str | None = None,
-    repo_name: str | None = None,
-    budget: int = 2000,
-) -> dict[str, Any]:
-    """Refresh memory and prepare context at dispatch conversation start."""
-    return session_start(
-        task_id, role, query, _source(source_path),
-        repo_name=repo_name, budget=budget
-    )
-
-
-@mcp.tool()
-def dispatch_session_finish(
-    task_id: str,
-    role: str,
-    exit_code: int,
-    source_path: str | None = None,
-    status: str | None = None,
-    repo_name: str | None = None,
-) -> dict[str, Any]:
-    """Ingest findings and record the end of a dispatched conversation."""
-    return session_finish(
-        task_id,
-        role,
-        _source(source_path),
-        exit_code=exit_code,
-        status=status,
-        repo_name=repo_name,
-    )
 
 
 def main() -> None:

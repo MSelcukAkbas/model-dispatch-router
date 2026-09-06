@@ -6,7 +6,7 @@
 #   --raw      print the raw JSON response (for other scripts, e.g. health.sh
 #              / dispatch.sh's quota pre-check).
 #   account    optional name from accounts.sh's ACCOUNT_CONFIG_DIR registry
-#              (currently: akb34) — check THAT account's quota instead of
+#              from accounts.sh — check THAT account's quota instead of
 #              the ambient one. Unknown name: exit 1, no guessing.
 #
 # Reads the OAuth token from <config-dir>/.credentials.json and queries the
@@ -18,7 +18,7 @@
 #
 # Fixed 2026-08-02: this used to hardcode ~/.claude regardless of the
 # AMBIENT CLAUDE_CONFIG_DIR too — a caller running under a non-default
-# account (e.g. this very orchestrator, under CLAUDE_CONFIG_DIR=...-akb34)
+# account (for example an orchestrator with a custom CLAUDE_CONFIG_DIR)
 # would silently have its quota checked against a DIFFERENT (the plain
 # default) account's credentials. Confirmed live before fixing. Now: no
 # `account` arg given -> respects ambient CLAUDE_CONFIG_DIR if set, else

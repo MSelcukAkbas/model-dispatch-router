@@ -11,7 +11,7 @@
 #                     give it all context up front, it shouldn't need to
 #                     explore). Must match .claude/skills/model-dispatch/personas/<role>.md.
 #   task-id          IMMUTABLE identifier — use the ticket ID this task closes
-#                     (e.g. KYC-121, FE-135-FE-136 for a combined batch), or
+#                     (e.g. TASK-121 or TASK-135-TASK-136 for a batch), or
 #                     run new-id.sh for a T-NNNNNN id if there's no ticket.
 #                     Never rename a task mid-flight — worktree/branch/logs
 #                     are all keyed off this exact string.
@@ -40,7 +40,7 @@
 #                     under-counts — see diffstat comment). Bypasses the exit
 #                     19 safety net on purpose; not for routine use.
 #   account          optional, a name from accounts.sh's ACCOUNT_CONFIG_DIR
-#                     registry (currently: akb34, deepseek) — routes this
+#                     registry — routes this
 #                     dispatch's `claude -p` call at that account's
 #                     CLAUDE_CONFIG_DIR (separate credentials/session/quota)
 #                     instead of the ambient one. Default "" — leaves
@@ -49,24 +49,18 @@
 #                     name: exit 1 before anything is dispatched. Recorded in
 #                     $TASK.meta (both the name and the resolved dir) so
 #                     resume.sh reproduces the SAME account automatically.
-#                     deepseek routes through a non-Anthropic endpoint —
-#                     accounts.sh's apply_account_extra_env also exports
+#                     Provider-specific accounts may use a compatible endpoint;
+#                     accounts.sh's apply_account_extra_env may also export
 #                     ANTHROPIC_BASE_URL/_AUTH_TOKEN/_MODEL/_DEFAULT_*_MODEL
-#                     for it (no-op for akb34/ambient). User-designated
-#                     cheaper/experimental — not a verified quality match for
-#                     real Sonnet/Opus/Haiku, prefer it for routine/low-stakes
-#                     dispatch load, not anything quality-critical.
+#                     provider environment variables. Keep credentials outside
+#                     tracked files and choose providers according to task risk.
 #   no-worktree      optional, "1" to skip `git worktree add` entirely and run
 #                     straight in the main checkout (RUN_DIR=$REPO_ROOT), same
 #                     as the readonly roles already do. Default "0" (normal
 #                     worktree). Needed for any target that a worktree of THIS
-#                     repo's HEAD cannot reach — chiefly sdks/, which is fully
-#                     gitignored here (main repo has zero tracked files under
-#                     it) and is itself a separate nested git repo (with the
-#                     four SDK folders under sdks/android/ nested a level
-#                     deeper still) — `git worktree add` only materializes
-#                     tracked content, so a normal sdk-role worktree has no
-#                     sdks/ directory in it at all (found 2026-07-28). With
+#                     repo's HEAD cannot reach, such as ignored content or a
+#                     separate nested repository. `git worktree add` only
+#                     materializes tracked content. With
 #                     no-worktree=1 the dispatched agent's cwd is the real
 #                     working tree, so those paths are physically present.
 #                     Trade-off: no isolation from concurrent no-worktree
@@ -118,8 +112,18 @@ ACCOUNT="${8:-}"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=accounts.sh
-source "$SCRIPT_DIR/accounts.sh"
+# accounts.sh is a machine-local optional registry and is intentionally not
+# distributed. A fresh clone works with the ambient Claude account.
+if [ -f "$SCRIPT_DIR/accounts.sh" ]; then
+  # shellcheck source=accounts.sh
+  source "$SCRIPT_DIR/accounts.sh"
+else
+  resolve_account_config_dir() {
+    echo "error: account '$1' is not configured; create scripts/accounts.sh locally" >&2
+    return 1
+  }
+  apply_account_extra_env() { :; }
+fi
 PERSONA_FILE="$SCRIPT_DIR/../personas/$ROLE.md"
 WORKTREE_DIR="$REPO_ROOT/.worktrees/$TASK"
 BRANCH="agent/$TASK"
@@ -198,7 +202,7 @@ declare -A ROLE_BRIDGE=(
 # bridge tools must be named explicitly or the allowlist silently blocks
 # them even with the MCP server configured and connected.
 BRIDGE_TOOL_NAMES="mcp__agent-bridge__ask_orchestrator,mcp__agent-bridge__submit_result,mcp__agent-bridge__list_pending_questions,mcp__agent-bridge__answer_question,mcp__agent-bridge__get_result,mcp__agent-bridge__knowledge_write,mcp__agent-bridge__knowledge_search"
-AGENTMIND_TOOL_NAMES="mcp__agentmind__memory_status_tool,mcp__agentmind__memory_context,mcp__agentmind__memory_for_file,mcp__agentmind__dispatch_session_start,mcp__agentmind__dispatch_session_finish"
+AGENTMIND_TOOL_NAMES="mcp__agentmind__memory_status_tool,mcp__agentmind__memory_context,mcp__agentmind__memory_for_file"
 MODEL="${ROLE_MODEL[$ROLE]:-sonnet}"
 
 # Role -> default reasoning effort. research is cheap-scan-only (Haiku, no
@@ -213,6 +217,18 @@ declare -A ROLE_EFFORT=(
   [research]="low"
   [judge]="high"
 )
+
+# Optional project configuration. A checked-in `.model-dispatch.json` can
+# override roles, models, budgets, personas and the optional ops MCP config
+# without editing this reusable skill.
+ROLE_CONFIG_JSON="$(node "$SCRIPT_DIR/role-config.js" "$ROLE" "$REPO_ROOT" "$SCRIPT_DIR/..")" || exit $?
+MODEL="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).model))" "$ROLE_CONFIG_JSON")"
+ROLE_EFFORT[$ROLE]="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).effort))" "$ROLE_CONFIG_JSON")"
+ROLE_READONLY[$ROLE]="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).readonly))" "$ROLE_CONFIG_JSON")"
+ROLE_BRIDGE[$ROLE]="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).bridge))" "$ROLE_CONFIG_JSON")"
+ROLE_MAX_BUDGET="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).maxBudgetUsd))" "$ROLE_CONFIG_JSON")"
+PERSONA_FILE="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).persona))" "$ROLE_CONFIG_JSON")"
+OPS_MCP_CONFIG="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).opsMcpConfig || '')" "$ROLE_CONFIG_JSON")"
 EFFORT="${EFFORT_OVERRIDE:-${ROLE_EFFORT[$ROLE]:-high}}"
 case "$EFFORT" in
   low|medium|high|xhigh|max) ;;
@@ -369,7 +385,7 @@ declare -A ROLE_MAX_BUDGET_USD=(
   [research]="0.50"
   [judge]="4.00"
 )
-SEED_BUDGET="${ROLE_MAX_BUDGET_USD[$ROLE]:-2.00}"
+SEED_BUDGET="$ROLE_MAX_BUDGET"
 
 # ATTEMPT/diffstat persistence delayed until AFTER the clamp decision below
 # (2026-07-30 fix — H9): this used to write $TASK.attempt (and, further
@@ -471,13 +487,11 @@ echo "$ATTEMPT" > "$LOG_DIR/$TASK.attempt"
 # Per-task dynamic config (2026-07-30 fix — H1). The former static
 # mcp-bridge-only.json/settings-enforce-result.json files hardcoded an
 # ABSOLUTE path to this skill's own agent-bridge.js/enforce-submit-result.js.
-# This skill got copied between repos
-# (MCpAndSkill/multiagent2 -> arvis_code) and the static files still pointed
-# at the FIRST repo's copy — every dispatch from the second repo silently
+# This skill can be copied between repositories while static files still point
+# at the first repository's copy. Every dispatch from the second repo would then
 # wrote its bridge state (.bridge.json/.stophook-count/.result-missing) into
 # the WRONG repo's .agent-logs/, invisible to cleanup.sh and to whoever's
-# actually looking in THIS repo's .agent-logs/ (confirmed live: 27+
-# arvis-task bridge files sitting in multiagent2's .agent-logs/). Generating
+# actually looking in THIS repo's .agent-logs/. Generating
 # a fresh per-task config from $SCRIPT_DIR (always resolves to THIS repo,
 # wherever the skill physically lives) eliminates the whole bug class rather
 # than just re-pointing the static files at today's repo. `pwd -W` gets a
@@ -527,9 +541,18 @@ fi
 
 if [ "${ROLE_BRIDGE[$ROLE]:-false}" != "true" ]; then
   MCP_ARGS=(--strict-mcp-config)
-elif [ "$ROLE" = "ops" ]; then
-  MCP_ARGS=(--strict-mcp-config --mcp-config "$SCRIPT_DIR/../mcp-ssh-only.json" "$BRIDGE_CONFIG")
+elif [ "$ROLE" = "ops" ] && [ -n "$OPS_MCP_CONFIG" ]; then
+  MCP_ARGS=(--strict-mcp-config --mcp-config "$OPS_MCP_CONFIG" "$BRIDGE_CONFIG")
 else
+  if [ "$ROLE" = "ops" ]; then
+    # opsMcpConfig is opt-in per repo (.model-dispatch.json) since remote
+    # access tooling is machine/project-specific and must not be hardcoded
+    # into this shared skill. Silently falling through to the bridge-only
+    # config would dispatch an ops task with no way to reach the infrastructure
+    # it was asked to diagnose — the agent would discover this only by
+    # failing partway through, not from anything the dispatcher told it.
+    echo "warning: role=ops but no opsMcpConfig is set in .model-dispatch.json — dispatching with NO remote-access MCP server (bridge only). Set opsMcpConfig if this task needs infrastructure tools." >&2
+  fi
   MCP_ARGS=(--strict-mcp-config --mcp-config "$BRIDGE_CONFIG")
 fi
 
@@ -633,10 +656,10 @@ done
   if [ -n "$TARGET_CONFIG_DIR" ]; then
     export CLAUDE_CONFIG_DIR="$TARGET_CONFIG_DIR"
   fi
-  # Third-party-endpoint accounts (e.g. deepseek) also need
+  # Compatible third-party provider accounts may also need
   # ANTHROPIC_BASE_URL/_AUTH_TOKEN/_MODEL/_DEFAULT_*_MODEL — see accounts.sh's
   # apply_account_extra_env. No-op (exports nothing) for native Claude
-  # accounts like akb34 or the ambient default.
+  # ordinary named accounts or the ambient default.
   apply_account_extra_env "$ACCOUNT"
   # stream-json (not json): --output-format json buffers the ENTIRE run and
   # writes one blob only at process exit — if the task is killed mid-flight

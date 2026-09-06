@@ -32,7 +32,7 @@ QUOTA_SIGNATURE='usage limit|rate_limit_error|exceeded your.*(usage|quota)|\b429
 # $TASK.json — which is the full stream-json transcript, every turn's text
 # included — false-positives on any billing/credits task whose actual work
 # is legitimately talking about cost limits (this platform deducts credits
-# per KYC call; a backend task fixing that logic would say exactly these
+# per request; a backend task fixing that logic would say exactly these
 # words with zero connection to dispatch.sh's own --max-budget-usd cap).
 # Parse the JSONL and check ONLY the terminal "result" event's own
 # subtype/errors fields — the one place the CLI actually reports this.

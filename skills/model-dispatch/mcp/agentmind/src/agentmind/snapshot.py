@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -71,7 +72,10 @@ def take_snapshot(
     if not src.is_dir():
         raise FileNotFoundError(f"source repo not found: {src}")
 
-    stamp = label or datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    stamp = label or (
+        datetime.now().strftime("%Y-%m-%d-%H%M%S-%f")
+        + f"-{uuid.uuid4().hex[:8]}"
+    )
     dest = Path(snapshots_root).expanduser().resolve() / stamp
     result = SnapshotResult(dest=dest)
     # Created up front: a source repo with neither .agent-logs nor a

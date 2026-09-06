@@ -60,7 +60,7 @@ def live(tmp_path):
 
     logs = src / ".agent-logs"
     logs.mkdir()
-    (logs / "T-1.meta").write_text("role=backend\naccount=akb34\n", encoding="utf-8")
+    (logs / "T-1.meta").write_text("role=backend\naccount=secondary\n", encoding="utf-8")
 
     kdir = src / ".claude" / "knowledge"
     kdir.mkdir(parents=True)

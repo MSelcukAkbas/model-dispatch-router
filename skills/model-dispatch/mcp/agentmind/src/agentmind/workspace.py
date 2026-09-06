@@ -9,7 +9,8 @@ already knows about both directories.
 A small user-level registry closes that. It lists workspace roots, one per
 line; each workspace's own `corpora` table says which repos it watches. From
 any directory the lookup is: an explicit --root, then a store above here, then
-the workspace that watches this directory, then the only workspace there is.
+the workspace that watches this directory. A lone unrelated workspace is never
+guessed.
 """
 
 from __future__ import annotations
@@ -82,9 +83,6 @@ def locate_store(start: Path | str | None = None) -> tuple[Path | None, str]:
     for workspace in registered:
         if _watches(workspace, here):
             return workspace, "the workspace watching this repo"
-
-    if len(registered) == 1:
-        return registered[0], "the only registered workspace"
 
     return None, "not found"
 

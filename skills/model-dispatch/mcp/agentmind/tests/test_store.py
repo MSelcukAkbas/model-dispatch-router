@@ -20,21 +20,21 @@ def test_init_creates_db_and_tables(tmp_path):
 
 def test_events_append_and_filter(tmp_path):
     db, repo = _repo(tmp_path)
-    repo.add_event("task.dispatched", task_id="KYC-1", payload={"role": "backend"})
-    repo.add_event("task.result", task_id="KYC-1", payload={"status": "DONE"})
-    repo.add_event("task.dispatched", task_id="FE-2")
+    repo.add_event("task.dispatched", task_id="TASK-1", payload={"role": "backend"})
+    repo.add_event("task.result", task_id="TASK-1", payload={"status": "DONE"})
+    repo.add_event("task.dispatched", task_id="TASK-2")
 
     assert repo.count_events() == 3
     assert len(repo.list_events(kind="task.dispatched")) == 2
-    assert len(repo.list_events(task_id="KYC-1")) == 2
+    assert len(repo.list_events(task_id="TASK-1")) == 2
     assert repo.list_events(limit=1)[0]["kind"] == "task.dispatched"
     db.close()
 
 
 def test_upsert_task_overwrites_on_reimport(tmp_path):
     db, repo = _repo(tmp_path)
-    repo.upsert_task({"task_id": "KYC-9", "role": "backend", "attempt": 1})
-    repo.upsert_task({"task_id": "KYC-9", "role": "backend", "attempt": 3})
+    repo.upsert_task({"task_id": "TASK-9", "role": "backend", "attempt": 1})
+    repo.upsert_task({"task_id": "TASK-9", "role": "backend", "attempt": 3})
 
     rows = repo.list_tasks()
     assert len(rows) == 1
@@ -45,10 +45,10 @@ def test_upsert_task_overwrites_on_reimport(tmp_path):
 def test_account_filter_matches_ambient_empty_string(tmp_path):
     db, repo = _repo(tmp_path)
     repo.upsert_task({"task_id": "A", "role": "backend", "account": ""})
-    repo.upsert_task({"task_id": "B", "role": "backend", "account": "akb34"})
+    repo.upsert_task({"task_id": "B", "role": "backend", "account": "secondary"})
 
     assert {r["task_id"] for r in repo.list_tasks(account="")} == {"A"}
-    assert {r["task_id"] for r in repo.list_tasks(account="akb34")} == {"B"}
+    assert {r["task_id"] for r in repo.list_tasks(account="secondary")} == {"B"}
     db.close()
 
 
@@ -81,10 +81,10 @@ def test_task_stats_separates_agy_from_ambient_claude(tmp_path):
     db, repo = _repo(tmp_path)
     repo.upsert_task({"task_id": "A", "role": "research", "engine": "agy", "account": ""})
     repo.upsert_task({"task_id": "B", "role": "research", "engine": "claude", "account": ""})
-    repo.upsert_task({"task_id": "C", "role": "research", "engine": "claude", "account": "akb34"})
+    repo.upsert_task({"task_id": "C", "role": "research", "engine": "claude", "account": "secondary"})
 
     rows = {(r["engine"], r["account"]): r["n"] for r in repo.task_stats()}
-    assert rows == {("agy", "n/a"): 1, ("claude", "ambient"): 1, ("claude", "akb34"): 1}
+    assert rows == {("agy", "n/a"): 1, ("claude", "ambient"): 1, ("claude", "secondary"): 1}
     db.close()
 
 

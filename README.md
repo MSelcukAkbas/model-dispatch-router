@@ -1,8 +1,7 @@
-# AgentMind workspace
+# AgentMind + Model Dispatch
 
-AgentMind, ajanların ürettiği bilgiyi kodla ilişkilendiren, ilgili bağlamı
-token bütçesiyle hazırlayan ve iddiaları yerel kontrollerden geçiren bir
-orkestrasyon çekirdeğidir.
+AgentMind, ajanların ürettiği bilgiyi kodla ilişkilendiren; Codex ve Claude Code
+oturumlarına ilgili bağlamı otomatik sağlayan model-dispatch hafıza çekirdeğidir.
 
 ## Dizinler
 
@@ -10,6 +9,22 @@ orkestrasyon çekirdeğidir.
 - `docs/`: proje durumu ve araştırma notları
 - `references/`: salt-okunur haricî projeler ve geçmiş kaynaklar
 - `.agentmind/`, `snapshots/`, `graphify-out/`: Git'e alınmayan çalışma verisi
+
+## Kurulum
+
+```powershell
+uv tool install --editable ".\skills\model-dispatch\mcp\agentmind[graph]" --force
+am hooks-install . --platform all
+```
+
+`--platform codex` yalnızca Codex, `--platform claude` yalnızca Claude Code
+kancalarını kurar. Kurucu mevcut kanca ayarlarını silmez; AgentMind girişlerini
+birleştirir. İlk oturum başlangıcında bu depoya ait corpus ve çalışma verisi
+otomatik oluşur. Bunlar Git'e alınmaz.
+
+Rolleri özelleştirmek için `model-dispatch.example.json` dosyasını
+`.model-dispatch.json` adıyla kopyalayın. Bu yerel dosyaya sır, erişim anahtarı
+veya makineye özel hesap bilgisi koymayın.
 
 ## Otomatik model-dispatch hafızası
 
@@ -29,12 +44,6 @@ Otomatik alınan iddialar aday bilgidir; doğrulanmış bilgiye yükseltme yine
 cd skills/model-dispatch/mcp/agentmind
 uv sync --extra graph --group dev
 uv run pytest -q
-```
-
-Komutları sisteme kurmak için:
-
-```powershell
-uv tool install --editable ".\skills\model-dispatch\mcp\agentmind[graph]" --force
 ```
 
 Kurulum ve komutlar için [uygulama README'sine](skills/model-dispatch/mcp/agentmind/README.md), mevcut

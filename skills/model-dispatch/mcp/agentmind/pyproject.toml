@@ -28,6 +28,7 @@ graph = ["graphifyy[sql]==0.9.53"]
 [project.scripts]
 am = "agentmind.cli:main"
 agentmind-mcp = "agentmind.server.main:main"
+agentmind-hook = "agentmind.hooks:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

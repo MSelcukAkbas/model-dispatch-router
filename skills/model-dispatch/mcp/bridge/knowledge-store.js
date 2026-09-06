@@ -202,7 +202,7 @@ function commitsSinceEvidence(cwd, commitSha, evidence) {
 
 // FTS5'in varsayılan MATCH semantiği çok kelimeli bir sorgudaki TÜM
 // kelimelerin aynı satırda geçmesini şart koşar (implicit AND) — 2026-08-23
-// canlı testte bulundu: "tenant resolution failure 6 step cascade" gibi
+// A live test found that multi-word concepts can be split into noisy tokens,
 // doğal-dil bir sorgu, kayıtta "failure"/"cascade" geçmediği için sıfır
 // sonuç döndürdü, halbuki topic tam eşleşiyordu. Kelimeleri OR ile
 // birleştirmek herhangi bir kelimenin eşleşmesini yeterli kılar — BM25

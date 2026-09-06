@@ -1,9 +1,6 @@
 # --- SECRETS ---------------------------------------------------------------
-# references/miras.claude carries a plaintext DeepSeek API key in two places:
-#   skills/model-dispatch/scripts/accounts.sh  (ACCOUNT_ANTHROPIC_AUTH_TOKEN)
-#   claude-deepseek.bat                        (ANTHROPIC_AUTH_TOKEN)
-# Never track these. Ignoring them here does NOT make the key safe — it is
-# still in plaintext on disk and must be rotated and moved to an env var.
+# Imported reference trees may contain machine-local credentials. Never track
+# them; ignoring a credential does not make it safe, so rotate any exposed key.
 references/miras.claude/
 references/miras.remember/
 
@@ -18,6 +15,9 @@ skills/model-dispatch/scripts/accounts.sh
 
 # --- Runtime state ----------------------------------------------------------
 .agentmind/
+.agent-logs/
+.worktrees/
+.model-dispatch.json
 # graphify writes its AST cache and graph.json here whenever extraction runs
 graphify-out/
 .data/

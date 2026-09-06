@@ -20,6 +20,7 @@ from .context import build_context, build_file_context, estimate_tokens
 from .gate import evaluate_task, graph_delta
 from .importer import import_snapshot
 from .lifecycle import session_finish, session_start
+from .hooks import install_hooks
 from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .router import POLICY, memory_gaps, recommend
 from .snapshot import take_snapshot
@@ -39,6 +40,16 @@ app = typer.Typer(
     help="AgentMind kernel — event log, task history and claim store.",
     no_args_is_help=True,
 )
+
+
+@app.command("hooks-install")
+def hooks_install(
+    source: Path = typer.Argument(Path.cwd(), help="Repository to configure."),
+    platform: str = typer.Option("all", "--platform", help="all, codex, or claude"),
+) -> None:
+    """Install non-destructive AgentMind lifecycle hooks in a repository."""
+    for path in install_hooks(source, platform.lower()):
+        console.print(f"[green]configured[/green] {path}")
 # Windows consoles default to a legacy code page - cp1254 on a Turkish install -
 # and agent-written claim text routinely carries characters it cannot encode
 # (arrows, em-dashes, box drawing). That raised UnicodeEncodeError partway

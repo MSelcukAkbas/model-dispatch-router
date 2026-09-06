@@ -69,5 +69,7 @@ fi
 
 echo
 echo "Done. Review with: git -C \"$REPO_ROOT\" status --short"
+printf 'pending\n' > "$LOG_DIR/$TASK.gate-pending"
+echo "Verification gate queued for the next clean committed session."
 echo "This did NOT stage, commit, or push anything."
 exit 0

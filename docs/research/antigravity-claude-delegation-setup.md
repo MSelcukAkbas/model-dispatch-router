@@ -124,5 +124,5 @@ real delegation round-trip — only the external-API layering (item 6) remains,
 and it's blocked on the user acquiring keys, not on any pending Claude-side
 work.
 
-See also [[arvis-workspace-setup]] for the unrelated ArVis project context this
+See the repository-local setup notes for any project-specific context this
 setup work happened alongside.

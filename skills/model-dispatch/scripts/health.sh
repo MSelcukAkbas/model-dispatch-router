@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage: health.sh [account]
 #   account   optional name from accounts.sh's ACCOUNT_CONFIG_DIR registry
-#             (currently: akb34) — checks THAT account's quota instead of
+#             from accounts.sh — checks THAT account's quota instead of
 #             the ambient one. Default "": ambient (whatever CLAUDE_CONFIG_DIR
 #             the calling shell already has). Unknown name: exit 1.
 # Pre-flight check — run BEFORE dispatch.sh, with the SAME account you intend

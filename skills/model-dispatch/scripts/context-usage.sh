@@ -14,7 +14,7 @@
 #                a claude -p --output-format json response). Override if a
 #                different model/tier applies.
 #   account      optional name from accounts.sh's ACCOUNT_CONFIG_DIR registry
-#                (currently: akb34) — look under THAT account's config dir
+#                from accounts.sh — look under THAT account's config dir
 #                instead of the ambient one. Default "": ambient (whatever
 #                CLAUDE_CONFIG_DIR this shell already has, or the plain
 #                default if unset). Only relevant if you're checking a
@@ -31,7 +31,7 @@
 #
 # Fixed 2026-08-02: this used to hardcode ~/.claude/projects regardless of
 # the AMBIENT CLAUDE_CONFIG_DIR — confirmed this orchestrator's OWN session
-# transcript actually lives under CLAUDE_CONFIG_DIR (...-akb34)/projects,
+# transcript may live under a custom CLAUDE_CONFIG_DIR/projects directory,
 # not ~/.claude/projects, so the old hardcoded path would have found nothing
 # for this very session.
 set -euo pipefail

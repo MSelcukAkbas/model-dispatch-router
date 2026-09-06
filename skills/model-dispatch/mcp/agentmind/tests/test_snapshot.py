@@ -8,10 +8,10 @@ def _fake_repo(tmp_path):
     src = tmp_path / "live"
     logs = src / ".agent-logs"
     logs.mkdir(parents=True)
-    (logs / "KYC-1.meta").write_text("role=backend\naccount=\n", encoding="utf-8")
-    (logs / "KYC-1.attempt").write_text("1\n", encoding="utf-8")
-    (logs / "KYC-1.diffstat").write_text("10\n", encoding="utf-8")
-    (logs / "KYC-1.json").write_text('{"type":"run"}\n', encoding="utf-8")
+    (logs / "TASK-1.meta").write_text("role=backend\naccount=\n", encoding="utf-8")
+    (logs / "TASK-1.attempt").write_text("1\n", encoding="utf-8")
+    (logs / "TASK-1.diffstat").write_text("10\n", encoding="utf-8")
+    (logs / "TASK-1.json").write_text('{"type":"run"}\n', encoding="utf-8")
 
     kdir = src / ".claude" / "knowledge"
     kdir.mkdir(parents=True)
@@ -37,8 +37,8 @@ def test_snapshot_copies_meta_sidecars_and_knowledge(tmp_path):
 
     assert result.knowledge_db is True
     assert result.agent_log_files == 3  # meta + attempt + diffstat, no *.json
-    assert (result.dest / "agent-logs" / "KYC-1.meta").is_file()
-    assert not (result.dest / "agent-logs" / "KYC-1.json").exists()
+    assert (result.dest / "agent-logs" / "TASK-1.meta").is_file()
+    assert not (result.dest / "agent-logs" / "TASK-1.json").exists()
     assert (result.dest / "knowledge" / "knowledge.db").is_file()
     assert "source:" in (result.dest / "SOURCE.txt").read_text(encoding="utf-8")
 
@@ -47,7 +47,7 @@ def test_with_logs_also_copies_run_logs(tmp_path):
     src = _fake_repo(tmp_path)
     result = take_snapshot(src, tmp_path / "snapshots", with_logs=True, label="s2")
     assert result.agent_log_files == 4
-    assert (result.dest / "agent-logs" / "KYC-1.json").is_file()
+    assert (result.dest / "agent-logs" / "TASK-1.json").is_file()
 
 
 def test_snapshot_never_writes_to_the_source(tmp_path):
@@ -77,3 +77,13 @@ def test_missing_directories_are_notes_not_errors(tmp_path):
     assert result.agent_log_files == 0
     assert result.knowledge_db is False
     assert len(result.notes) == 2
+
+
+def test_unlabelled_snapshots_are_unique(tmp_path):
+    src = _fake_repo(tmp_path)
+    first = take_snapshot(src, tmp_path / "snapshots")
+    second = take_snapshot(src, tmp_path / "snapshots")
+
+    assert first.dest != second.dest
+    assert first.dest.is_dir()
+    assert second.dest.is_dir()

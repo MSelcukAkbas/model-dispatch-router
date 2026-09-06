@@ -74,7 +74,7 @@ def test_session_finish_records_event_when_sync_fails(tmp_path, monkeypatch):
     db.close()
 
 
-def test_session_start_cli_is_fail_open_without_a_store(tmp_path):
+def test_session_start_cli_bootstraps_a_repository_store(tmp_path):
     out = tmp_path / "context.md"
     result = CliRunner().invoke(
         app,
@@ -86,7 +86,13 @@ def test_session_start_cli_is_fail_open_without_a_store(tmp_path):
 
     assert result.exit_code == 0
     assert out.read_text(encoding="utf-8") == ""
-    assert "failed (ignored)" in result.output
+    assert (tmp_path / ".agentmind" / "am.db").is_file()
+    db = Database(resolve_db_path(tmp_path))
+    db.init_db()
+    corpus = Repository(db).corpus_for_source(tmp_path)
+    assert corpus is not None
+    assert corpus["name"] == tmp_path.name
+    db.close()
 
 
 def test_mcp_registers_memory_and_lifecycle_tools():
@@ -95,8 +101,6 @@ def test_mcp_registers_memory_and_lifecycle_tools():
         "memory_status_tool",
         "memory_context",
         "memory_for_file",
-        "dispatch_session_start",
-        "dispatch_session_finish",
     }
 
 
@@ -113,5 +117,4 @@ def test_mcp_stdio_server_completes_handshake():
                 return {tool.name for tool in result.tools}
 
     names = asyncio.run(exercise_server())
-    assert "dispatch_session_start" in names
-    assert "dispatch_session_finish" in names
+    assert names == {"memory_status_tool", "memory_context", "memory_for_file"}

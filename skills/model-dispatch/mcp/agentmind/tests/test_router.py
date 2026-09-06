@@ -58,8 +58,8 @@ def test_no_band_is_called_strong_or_proven():
 # ----------------------------------------------------------------- evidence
 def test_evidence_counts_runs_retries_and_claims(tmp_path):
     db, repo = _repo(tmp_path)
-    _task(repo, "A", "backend", attempt=1, account="akb34")
-    _task(repo, "B", "backend", attempt=3, account="akb34")
+    _task(repo, "A", "backend", attempt=1, account="secondary")
+    _task(repo, "B", "backend", attempt=3, account="secondary")
     _task(repo, "C", "backend", attempt=None, account="")
     _claim(repo, 1, "A")
     _claim(repo, 2, "A")
@@ -71,7 +71,7 @@ def test_evidence_counts_runs_retries_and_claims(tmp_path):
     assert ev.retried == 1
     assert ev.retry_rate == 0.5
     assert ev.claims == 2
-    assert ev.accounts == {"akb34": 2, "ambient": 1}
+    assert ev.accounts == {"secondary": 2, "ambient": 1}
     db.close()
 
 
@@ -122,7 +122,7 @@ def test_a_heavy_retry_rate_is_surfaced(tmp_path):
     db, repo = _repo(tmp_path)
     for i in range(9):
         _task(repo, f"R{i}", "research", engine="claude",
-              attempt=2 if i < 5 else 1, account="akb34")
+              attempt=2 if i < 5 else 1, account="secondary")
 
     rec = recommend(repo, "research")
     ev = gather_evidence(repo, "research", engine="claude")

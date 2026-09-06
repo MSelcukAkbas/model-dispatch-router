@@ -86,7 +86,7 @@ def test_a_subdirectory_of_a_watched_repo_also_resolves(tmp_path, registry):
     assert found == root.resolve()
 
 
-def test_a_lone_registered_workspace_is_used_as_a_last_resort(tmp_path, registry):
+def test_a_lone_unrelated_workspace_is_not_guessed(tmp_path, registry):
     root = _workspace(tmp_path)
     workspace.register(root)
     elsewhere = tmp_path / "unrelated"
@@ -94,8 +94,8 @@ def test_a_lone_registered_workspace_is_used_as_a_last_resort(tmp_path, registry
 
     found, how = workspace.locate_store(elsewhere)
 
-    assert found == root.resolve()
-    assert "only registered" in how
+    assert found is None
+    assert how == "not found"
 
 
 def test_two_workspaces_and_no_match_is_not_a_guess(tmp_path, registry):
@@ -148,11 +148,11 @@ def test_a_remembered_corpus_supplies_the_path_later(tmp_path, registry):
     db = Database(resolve_db_path(root))
     db.init_db()
     repo = Repository(db)
-    repo.remember_corpus("arvis", tmp_path / "their-project")
+    repo.remember_corpus("project", tmp_path / "their-project")
 
-    row = repo.corpus("arvis")
+    row = repo.corpus("project")
     assert row["source_path"] == str((tmp_path / "their-project").resolve())
-    assert repo.only_corpus()["name"] == "arvis"
+    assert repo.only_corpus()["name"] == "project"
 
     repo.remember_corpus("second", tmp_path)
     assert repo.only_corpus() is None      # ambiguous, so no silent pick

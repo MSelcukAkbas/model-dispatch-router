@@ -8,8 +8,8 @@ timeout_min=25
 effort=high
 session_id=7b1e0f3a-0000-4000-8000-000000000001
 no_worktree=0
-account=akb34
-config_dir=C:\\Users\\akbas\\.claude-akb34
+account=secondary
+config_dir=C:\\Users\\example\\.claude-secondary
 max_budget_usd=1.50
 attempt=2
 """
@@ -24,7 +24,7 @@ def _repo(tmp_path):
 def test_parse_meta_keeps_windows_path_with_equals_and_backslashes():
     meta = parse_meta(META)
     assert meta["role"] == "backend"
-    assert meta["config_dir"] == "C:\\Users\\akbas\\.claude-akb34"
+    assert meta["config_dir"] == "C:\\Users\\example\\.claude-secondary"
     assert meta["max_budget_usd"] == "1.50"
 
 
@@ -37,9 +37,9 @@ def _make_snapshot(tmp_path):
     snap = tmp_path / "snapshots" / "s1"
     logs = snap / "agent-logs"
     logs.mkdir(parents=True)
-    (logs / "KYC-64.meta").write_text(META, encoding="utf-8")
-    (logs / "KYC-64.diffstat").write_text("42\n", encoding="utf-8")
-    (logs / "FE-1.meta").write_text("role=research\naccount=\neffort=low\n", encoding="utf-8")
+    (logs / "TASK-64.meta").write_text(META, encoding="utf-8")
+    (logs / "TASK-64.diffstat").write_text("42\n", encoding="utf-8")
+    (logs / "TASK-1.meta").write_text("role=research\naccount=\neffort=low\n", encoding="utf-8")
 
     kdir = snap / "knowledge"
     kdir.mkdir(parents=True)
@@ -54,7 +54,7 @@ def _make_snapshot(tmp_path):
     conn.execute(
         "INSERT INTO knowledge VALUES (7,'auth-threshold','constraint','gate is 85',"
         " '[{\"file\":\"app/gate.py\",\"line\":12,\"dirty\":false}]','task','abc123',"
-        " 'KYC-64','backend','candidate',0,'[\"KYC-64\"]',NULL,"
+        " 'TASK-64','backend','candidate',0,'[\"TASK-64\"]',NULL,"
         " '2026-08-30T10:00:00+00:00',NULL,NULL)"
     )
     conn.commit()
@@ -73,22 +73,22 @@ def test_import_loads_tasks_claims_and_events(tmp_path):
     assert repo.count_tasks() == 2
 
     by_id = {r["task_id"]: r for r in repo.list_tasks()}
-    kyc = by_id["KYC-64"]
-    assert kyc["role"] == "backend"
-    assert kyc["model"] == "sonnet"      # derived from ROLE_MODEL, not in .meta
-    assert kyc["account"] == "akb34"
-    assert kyc["budget_usd"] == 1.5
-    assert kyc["attempt"] == 2
-    assert kyc["diffstat"] == 42         # read from the sidecar file
-    assert kyc["started_at_exact"] == 0  # mtime-derived, flagged inexact
+    task = by_id["TASK-64"]
+    assert task["role"] == "backend"
+    assert task["model"] == "sonnet"      # derived from ROLE_MODEL, not in .meta
+    assert task["account"] == "secondary"
+    assert task["budget_usd"] == 1.5
+    assert task["attempt"] == 2
+    assert task["diffstat"] == 42         # read from the sidecar file
+    assert task["started_at_exact"] == 0  # mtime-derived, flagged inexact
 
-    assert by_id["FE-1"]["model"] == "haiku"
-    assert by_id["FE-1"]["account"] == ""
+    assert by_id["TASK-1"]["model"] == "haiku"
+    assert by_id["TASK-1"]["account"] == ""
 
     claim = repo.list_claims()[0]
     assert claim["id"] == 7
     assert claim["status"] == "candidate"
-    assert claim["source_task"] == "KYC-64"
+    assert claim["source_task"] == "TASK-64"
     assert "app/gate.py" in claim["evidence_json"]
 
     assert len(repo.list_events(kind="task.imported")) == 2
