@@ -18,6 +18,7 @@ from rich.table import Table
 
 from .context import build_context, build_file_context, estimate_tokens
 from .gate import evaluate_task, graph_delta
+from . import __version__
 from .importer import import_snapshot
 from .lifecycle import session_finish, session_start
 from .hooks import install_hooks
@@ -40,6 +41,27 @@ app = typer.Typer(
     help="AgentMind kernel — event log, task history and claim store.",
     no_args_is_help=True,
 )
+
+
+def _version_callback(value: bool) -> None:
+    """Report the installed version and stop.
+
+    A bug report that cannot say which build produced it costs more to answer
+    than it did to file, and `--version` is the first thing anyone tries.
+    """
+    if value:
+        console.print(f"agentmind {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False, "--version", callback=_version_callback, is_eager=True,
+        help="Show the installed version and exit.",
+    ),
+) -> None:
+    """AgentMind - repository memory for dispatched model sessions."""
 
 
 @app.command("hooks-install")

@@ -46,6 +46,13 @@ PLAIN="$(bindir "$WORK/plain")"
   && ok "am runs without the graph extra" \
   || fail "am is unusable without the graph extra"
 
+# A bug report that cannot name the build it came from costs more to answer
+# than it did to file.
+case "$("$PLAIN/am" --version 2>&1 || true)" in
+  *agentmind*[0-9]*) ok "am --version reports a version" ;;
+  *) fail "am --version does not report a version" ;;
+esac
+
 SETUP_OUT="$("$PLAIN/am" setup "$SAMPLE" --root "$WORK/ws-plain" 2>&1 || true)"
 case "$SETUP_OUT" in
   *partial*) ok "setup reports 'partial' when it cannot build a graph" ;;

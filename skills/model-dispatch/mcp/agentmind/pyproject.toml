@@ -7,10 +7,18 @@ name = "agentmind"
 version = "0.1.0"
 description = "Orchestration kernel: one event log, one overlay graph and token-budgeted context over model-dispatch, graphify and agentic-ssh-mcp"
 readme = "README.md"
-# Pinned below 3.13 on purpose: the graph extra pulls ~28 tree-sitter grammar
-# wheels, and the newest CPython (3.14 on this machine) does not have wheels
-# for all of them yet — a source build of those is a long, fragile detour.
-# uv provisions a project-local 3.12; the system interpreter is left alone.
+keywords = ["agents", "orchestration", "code-graph", "memory", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# Pinned below 3.13 on purpose: the graph extra pulls a tree-sitter grammar per
+# supported language, and the newest CPython release does not have wheels for
+# all of them yet — building those from source is a long, fragile detour. uv
+# provisions a project-local 3.12; the system interpreter is left alone.
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "typer>=0.15",
