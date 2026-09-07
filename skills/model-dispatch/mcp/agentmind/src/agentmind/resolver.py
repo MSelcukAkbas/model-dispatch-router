@@ -152,6 +152,10 @@ def resolve_claims(
 ) -> ResolveResult:
     """Rebuild node_refs for every claim against the stored graph.
 
+    Only claims belonging to `repo_name` are considered, and only that
+    corpus's rows are replaced. A workspace can watch several repositories, and
+    a claim about one of them says nothing about the others.
+
     `source_root` is the working tree the evidence paths are relative to. With
     it, an unresolved ref can say whether the file is gone (`file_missing`) or
     merely unparsed (`not_extracted`); without it every miss is `unresolved`.
@@ -163,7 +167,7 @@ def resolve_claims(
     exists_cache: dict[str, bool] = {}
     rows: list[dict[str, Any]] = []
 
-    for claim in repo.list_claims(limit=1_000_000):
+    for claim in repo.claims_for_corpus(repo_name):
         try:
             evidence = json.loads(claim["evidence_json"] or "[]")
         except (TypeError, ValueError):
@@ -214,14 +218,22 @@ def resolve_claims(
             else:
                 result.dangling += 1
 
-    repo.replace_node_refs(rows)
+    repo.replace_node_refs(repo_name, rows)
     return result
 
 
-def claim_evidence_files(repo: Repository) -> list[str]:
-    """Distinct files every claim cites — the extraction target for a monorepo."""
+def claim_evidence_files(repo: Repository, corpus: str | None = None) -> list[str]:
+    """Distinct files claims cite — the extraction target for a monorepo.
+
+    Scoped to one corpus when given, so building a graph for one watched
+    repository never tries to extract paths belonging to another.
+    """
     seen: dict[str, None] = {}
-    for claim in repo.list_claims(limit=1_000_000):
+    claims = (
+        repo.claims_for_corpus(corpus) if corpus
+        else repo.list_claims(limit=1_000_000)
+    )
+    for claim in claims:
         try:
             evidence = json.loads(claim["evidence_json"] or "[]")
         except (TypeError, ValueError):

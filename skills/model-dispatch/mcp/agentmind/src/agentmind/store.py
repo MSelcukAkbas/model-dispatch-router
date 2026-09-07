@@ -112,8 +112,63 @@ class Database:
         self._conn.execute("PRAGMA busy_timeout=30000")
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        # Order matters: drop what has become invalid first, let schema.sql
+        # recreate it, then add columns to the tables that survived. Dropping
+        # after the script ran left the table gone until the next start.
+        self._drop_obsolete()
         self._conn.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+        self._migrate()
         self._conn.commit()
+
+    # Columns added after a store already exists. `CREATE TABLE IF NOT EXISTS`
+    # leaves an existing table untouched, so a schema change reaches yesterday's
+    # database only through an explicit ALTER.
+    _ADDED_COLUMNS = (
+        ("claims", "corpus", "TEXT"),
+        ("node_refs", "repo", "TEXT NOT NULL DEFAULT ''"),
+    )
+
+    def _drop_obsolete(self) -> None:
+        """Remove tables whose shape can no longer be altered into the new one."""
+        assert self._conn is not None
+        self._drop_node_refs_if_unscoped()
+
+    def _migrate(self) -> None:
+        assert self._conn is not None
+        for table, column, decl in self._ADDED_COLUMNS:
+            existing = {
+                row[1] for row in self._conn.execute(f"PRAGMA table_info({table})")
+            }
+            if not existing:            # table absent: schema.sql will create it
+                continue
+            if column not in existing:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {decl}"
+                )
+
+    def _drop_node_refs_if_unscoped(self) -> None:
+        """Drop a node_refs table whose uniqueness predates corpus scoping.
+
+        The original constraint was UNIQUE(claim_id, evidence_idx), which two
+        watched repositories cannot both satisfy. A constraint cannot be
+        altered in SQLite, and this table holds nothing that is not derived -
+        `am resolve` rebuilds every row - so recreating it is cheaper and safer
+        than migrating rows that are about to be replaced anyway.
+        """
+        assert self._conn is not None
+        rows = list(self._conn.execute("PRAGMA index_list(node_refs)"))
+        if not rows:
+            return                      # table absent; schema.sql creates it
+        for row in rows:
+            name = row[1]
+            if not row[2]:              # not a uniqueness index
+                continue
+            columns = [
+                c[2] for c in self._conn.execute(f"PRAGMA index_info({name})")
+            ]
+            if "repo" not in columns:
+                self._conn.execute("DROP TABLE node_refs")
+                return
 
     def close(self) -> None:
         if self._conn is not None:
@@ -265,7 +320,7 @@ class Repository:
             "commit_sha", "source_task", "source_role", "status",
             "verification_count", "supporting_tasks_json", "superseded_by",
             "created_at", "last_verified_commit", "last_verified_at", "origin",
-            "source_status",
+            "source_status", "corpus",
         )
         row = _with_defaults(claim, CLAIM_DEFAULTS)
         values = [row.get(c) for c in cols]
@@ -405,18 +460,24 @@ class Repository:
         )
 
     # ------------------------------------------------------------- node_refs
-    def replace_node_refs(self, rows: list[dict[str, Any]]) -> int:
+    def replace_node_refs(self, repo_name: str, rows: list[dict[str, Any]]) -> int:
+        """Swap in the resolutions for one corpus.
+
+        Scoped to `repo_name` on purpose: an unscoped delete meant that
+        resolving one watched repository discarded every other repository's
+        resolutions, so whichever synced last was the only one still joined.
+        """
         conn = self._db.conn
-        conn.execute("DELETE FROM node_refs")
+        conn.execute("DELETE FROM node_refs WHERE repo = ?", (repo_name,))
         conn.executemany(
             "INSERT INTO node_refs"
             " (claim_id, evidence_idx, file, line, graph_node_id, resolved_at,"
-            "  dangling, reason)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "  dangling, reason, repo)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (r["claim_id"], r["evidence_idx"], r["file"], r.get("line"),
                  r.get("graph_node_id"), r.get("resolved_at"),
-                 int(r.get("dangling", 0)), r.get("reason", "resolved"))
+                 int(r.get("dangling", 0)), r.get("reason", "resolved"), repo_name)
                 for r in rows
             ],
         )
@@ -590,6 +651,41 @@ class Repository:
             if target == root or root in target.parents:
                 matches.append((len(root.parts), row))
         return max(matches, key=lambda item: item[0])[1] if matches else None
+
+    def claims_for_corpus(self, corpus: str) -> list[sqlite3.Row]:
+        return list(
+            self._db.conn.execute(
+                "SELECT * FROM claims WHERE corpus = ? ORDER BY id", (corpus,)
+            )
+        )
+
+    def adopt_unassigned_claims(self, corpus: str, source_root: Path | str) -> int:
+        """Assign pre-existing claims to the corpus whose tree holds their evidence.
+
+        Claims imported before corpus tracking existed carry no corpus. Rather
+        than leaving them permanently unresolvable, attribute each one to the
+        corpus whose source directory actually contains its first cited file.
+        """
+        root = Path(source_root).expanduser().resolve()
+        adopted = 0
+        for row in self._db.conn.execute(
+            "SELECT id, evidence_json FROM claims WHERE corpus IS NULL"
+        ).fetchall():
+            try:
+                evidence = json.loads(row["evidence_json"] or "[]")
+            except (TypeError, ValueError):
+                continue
+            files = [
+                str(e["file"]) for e in evidence
+                if isinstance(e, dict) and e.get("file")
+            ]
+            if any((root / f).exists() for f in files):
+                self._db.conn.execute(
+                    "UPDATE claims SET corpus = ? WHERE id = ?", (corpus, row["id"])
+                )
+                adopted += 1
+        self._db.conn.commit()
+        return adopted
 
     def only_corpus(self) -> sqlite3.Row | None:
         rows = self.corpora()

@@ -75,7 +75,12 @@ CREATE TABLE IF NOT EXISTS claims (
     -- What knowledge.db says this claim's status is. `status` above is ours:
     -- it is what the gate decided here, and a re-import must never overwrite
     -- it, or every sync would silently undo every verification.
-    source_status         TEXT
+    source_status         TEXT,
+    -- Which corpus this claim came from. A workspace can watch several
+    -- repositories, and a claim only means anything against the one whose
+    -- snapshot produced it; resolving it against another repository's graph
+    -- would report every citation as broken.
+    corpus                TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_topic  ON claims(topic);
@@ -94,12 +99,15 @@ CREATE TABLE IF NOT EXISTS node_refs (
     graph_node_id TEXT,
     resolved_at   TEXT,
     dangling      INTEGER NOT NULL DEFAULT 0,
+    -- The corpus this row was resolved against. Without it a rebuild for one
+    -- repository wiped the resolutions of every other.
+    repo          TEXT NOT NULL DEFAULT '',
     -- Why a ref did not resolve. 'resolved' | 'file_missing' (the cited path is
     -- gone — the code really moved) | 'not_extracted' (the file is there but no
     -- extractor covers it, e.g. .yaml). Collapsing these into one "dangling"
     -- number made a tooling gap look like code drift.
     reason        TEXT NOT NULL DEFAULT 'resolved',
-    UNIQUE(claim_id, evidence_idx)
+    UNIQUE(repo, claim_id, evidence_idx)
 );
 CREATE INDEX IF NOT EXISTS idx_node_refs_file ON node_refs(file);
 CREATE INDEX IF NOT EXISTS idx_node_refs_node ON node_refs(graph_node_id);

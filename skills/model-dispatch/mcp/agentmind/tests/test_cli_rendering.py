@@ -37,6 +37,7 @@ def _workspace(tmp_path, claim_text=NASTY, topic="topic[0]"):
         "status": "candidate", "source_task": "T-[1]",
         "created_at": "2026-09-01T00:00:00+00:00",
         "evidence_json": json.dumps([{"file": "app/gate.py", "line": 2}]),
+        "corpus": "t",
     })
     resolve_claims(repo, "t")
     db.close()

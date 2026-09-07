@@ -88,16 +88,19 @@ def sync(
 
     tasks_before = repo.count_tasks()
     claims_before = repo.count_claims()
-    cited_before = set(claim_evidence_files(repo))
+    cited_before = set(claim_evidence_files(repo, name))
 
     snap = take_snapshot(src, Path(workspace) / "snapshots")
-    imported = import_snapshot(repo, snap.dest)
+    imported = import_snapshot(repo, snap.dest, corpus=name)
+    # Claims stored before corpus tracking existed would otherwise never
+    # resolve again; attribute them to whichever tree actually holds them.
+    repo.adopt_unassigned_claims(name, src)
     result.notes.extend(imported.notes)
 
     result.new_tasks = repo.count_tasks() - tasks_before
     result.new_claims = repo.count_claims() - claims_before
 
-    cited = set(claim_evidence_files(repo))
+    cited = set(claim_evidence_files(repo, name))
     known = _graph_files(repo, name)
     # Newly cited means new to us this run. Comparing against the graph instead
     # made every unparseable-but-cited file (.yaml, .json) look new forever,

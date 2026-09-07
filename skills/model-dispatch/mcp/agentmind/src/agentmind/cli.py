@@ -462,7 +462,7 @@ def graph_build(
 ) -> None:
     """Extract a repo with graphify and store the graph. Read-only on the source."""
     db, repo = _open(root)
-    only = claim_evidence_files(repo) if from_claims else None
+    only = claim_evidence_files(repo, name) if from_claims else None
     if from_claims and not only:
         console.print("[yellow]no claim evidence to target — import a snapshot first[/yellow]")
         db.close()
@@ -959,7 +959,7 @@ def setup(
         built = None
     if graph_ready:
         built = build_graph(
-            repo, source, repo_name=corpus, only_files=claim_evidence_files(repo)
+            repo, source, repo_name=corpus, only_files=claim_evidence_files(repo, corpus)
         )
         console.print(f"      {built.nodes} nodes, {built.edges} edges")
         for note in built.notes:

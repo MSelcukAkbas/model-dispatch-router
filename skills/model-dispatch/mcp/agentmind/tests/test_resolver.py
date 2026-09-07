@@ -68,11 +68,12 @@ def test_normalise_edges_keeps_confidence():
 
 
 # ---------------------------------------------------------- resolution
-def _seed(repo, evidence, claim_id=1):
+def _seed(repo, evidence, claim_id=1, corpus="r"):
     repo.upsert_claim({
         "id": claim_id, "topic": "t", "category": "behavior", "claim": "c",
         "created_at": "2026-09-01T00:00:00+00:00",
         "evidence_json": json.dumps(evidence),
+        "corpus": corpus,
     })
 
 
@@ -171,4 +172,66 @@ def test_graphs_of_different_repos_do_not_collide(tmp_path):
 
     assert repo.nodes_for_file("a", "same.py")[0]["node_id"] == "x"
     assert repo.nodes_for_file("b", "same.py")[0]["node_id"] == "y"
+    db.close()
+
+
+# --------------------------------------------------- more than one corpus
+def test_resolving_one_corpus_leaves_another_alone(tmp_path):
+    """Found by restarting the session, not by review.
+
+    A workspace watching two repositories resolved both against whichever
+    corpus synced last, because the rebuild deleted every node_ref rather than
+    only its own. The first repository's claims all became dangling and its
+    join rate fell from 90% to zero.
+    """
+    db, repo = _repo(tmp_path)
+    repo.replace_graph("alpha", normalise_nodes([
+        {"id": "a_mod", "source_file": "app/a.py", "source_location": "L1"},
+    ]), [])
+    repo.replace_graph("beta", normalise_nodes([
+        {"id": "b_mod", "source_file": "app/b.py", "source_location": "L1"},
+    ]), [])
+    _seed(repo, [{"file": "app/a.py", "line": 2}], claim_id=1, corpus="alpha")
+    _seed(repo, [{"file": "app/b.py", "line": 2}], claim_id=2, corpus="beta")
+
+    first = resolve_claims(repo, "alpha")
+    second = resolve_claims(repo, "beta")
+
+    assert first.resolved == 1
+    assert second.resolved == 1
+    # Both survive: resolving beta must not have discarded alpha's row.
+    assert repo.resolution_summary()["resolved"] == 2
+    assert {r["graph_node_id"] for r in repo.claims_for_file("app/a.py")} == {"a_mod"}
+    assert {r["graph_node_id"] for r in repo.claims_for_file("app/b.py")} == {"b_mod"}
+    db.close()
+
+
+def test_a_claim_is_never_resolved_against_a_foreign_corpus(tmp_path):
+    """One repository's claim says nothing about another's code."""
+    db, repo = _repo(tmp_path)
+    repo.replace_graph("beta", normalise_nodes([
+        {"id": "b_mod", "source_file": "app/b.py", "source_location": "L1"},
+    ]), [])
+    _seed(repo, [{"file": "app/a.py", "line": 2}], claim_id=1, corpus="alpha")
+
+    result = resolve_claims(repo, "beta")
+
+    assert result.refs == 0            # not counted as broken, simply not beta's
+    assert repo.resolution_summary()["total"] == 0
+    db.close()
+
+
+def test_legacy_claims_are_adopted_by_the_corpus_that_holds_them(tmp_path):
+    """Claims stored before corpus tracking must not become unresolvable."""
+    db, repo = _repo(tmp_path)
+    src = tmp_path / "tree"
+    (src / "app").mkdir(parents=True)
+    (src / "app" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    _seed(repo, [{"file": "app/a.py", "line": 1}], claim_id=1, corpus=None)
+    _seed(repo, [{"file": "app/elsewhere.py", "line": 1}], claim_id=2, corpus=None)
+
+    adopted = repo.adopt_unassigned_claims("alpha", src)
+
+    assert adopted == 1                # only the one whose file is really there
+    assert [r["id"] for r in repo.claims_for_corpus("alpha")] == [1]
     db.close()

@@ -154,7 +154,10 @@ KNOWLEDGE_COLUMNS = (
 )
 
 
-def import_knowledge(repo: Repository, db_path: Path, result: ImportResult) -> None:
+def import_knowledge(
+    repo: Repository, db_path: Path, result: ImportResult,
+    corpus: str | None = None,
+) -> None:
     if not db_path.is_file():
         result.notes.append(f"no knowledge.db in snapshot: {db_path}")
         return
@@ -186,6 +189,9 @@ def import_knowledge(repo: Repository, db_path: Path, result: ImportResult) -> N
                 # verdict survives. source_status keeps the origin's own view.
                 "status": data["status"] or "candidate",
                 "source_status": data["status"],
+                # Stamped now so the claim is only ever resolved against
+                # the repository it actually describes.
+                "corpus": corpus,
                 "verification_count": data["verification_count"] or 0,
                 "supporting_tasks_json": data["supporting_tasks"] or "[]",
                 "superseded_by": data["superseded_by"],
@@ -199,14 +205,16 @@ def import_knowledge(repo: Repository, db_path: Path, result: ImportResult) -> N
     conn.close()
 
 
-def import_snapshot(repo: Repository, snapshot_dir: Path | str) -> ImportResult:
+def import_snapshot(
+    repo: Repository, snapshot_dir: Path | str, corpus: str | None = None,
+) -> ImportResult:
     snap = Path(snapshot_dir).expanduser().resolve()
     if not snap.is_dir():
         raise FileNotFoundError(f"snapshot not found: {snap}")
 
     result = ImportResult()
     import_agent_logs(repo, snap / "agent-logs", result)
-    import_knowledge(repo, snap / "knowledge" / "knowledge.db", result)
+    import_knowledge(repo, snap / "knowledge" / "knowledge.db", result, corpus)
 
     repo.add_event(
         "snapshot.imported",

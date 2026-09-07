@@ -56,6 +56,7 @@ def _add_claim(repo, claim_id, status, file="app/gate.py", line=12, topic=None):
         "commit_sha": None,
         "created_at": "2026-09-01T00:00:00+00:00",
         "evidence_json": json.dumps([{"file": file, "line": line}]),
+        "corpus": "t",
     })
 
 

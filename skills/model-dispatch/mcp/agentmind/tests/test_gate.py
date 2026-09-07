@@ -48,6 +48,7 @@ def world(tmp_path):
         "source_task": "T-1", "commit_sha": _head(src),
         "created_at": "2026-09-01T00:00:00+00:00",
         "evidence_json": json.dumps([{"file": "app/gate.py", "line": 1}]),
+        "corpus": "t",
     })
     resolve_claims(repo, "t", source_root=src)
     yield repo, src
@@ -132,6 +133,7 @@ def test_unknown_freshness_is_not_a_pass(world):
         "status": "candidate", "source_task": "T-2", "commit_sha": None,
         "created_at": "2026-09-01T00:00:00+00:00",
         "evidence_json": json.dumps([{"file": "app/gate.py", "line": 1}]),
+        "corpus": "t",
     })
     resolve_claims(repo, "t", source_root=src)
 
