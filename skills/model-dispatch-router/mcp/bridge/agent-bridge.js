@@ -22,7 +22,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const knowledgeStore = require('./knowledge-store');
-const ollamaEmbed = require('./ollama-embed');
 
 const REPO_ROOT = process.env.DISPATCH_REPO_ROOT
   ? path.resolve(process.env.DISPATCH_REPO_ROOT)
@@ -173,8 +172,6 @@ async function writeFindings(findings, taskId, sourceRole) {
   let written = 0;
   for (const f of findings) {
     try {
-      const claimText = `${f.topic || ''} ${f.claim || ''}`.trim();
-      const embedding = await ollamaEmbed.embed(claimText); // fail-soft: null olabilir
       knowledgeStore.insertKnowledge({
         topic: f.topic,
         category: f.category,
@@ -183,7 +180,6 @@ async function writeFindings(findings, taskId, sourceRole) {
         scope: f.scope || 'task',
         source_task: taskId,
         source_role: sourceRole,
-        embedding,
       }, cwd);
       written++;
     } catch (e) {
@@ -284,8 +280,6 @@ async function toolKnowledgeWrite(args) {
   const taskId = args.task_id || process.env.DISPATCH_TASK_ID || null;
   const sourceRole = args.source_role || process.env.DISPATCH_ROLE || null;
   const cwd = process.cwd();
-  const claimText = `${args.topic || ''} ${args.claim || ''}`.trim();
-  const embedding = await ollamaEmbed.embed(claimText);
   const result = knowledgeStore.insertKnowledge({
     topic: args.topic,
     category: args.category,
@@ -294,24 +288,19 @@ async function toolKnowledgeWrite(args) {
     scope: args.scope || 'task',
     source_task: taskId,
     source_role: sourceRole,
-    embedding,
   }, cwd);
-  return `knowledge kaydedildi (id=${result.id}, topic=${result.topic}, commit_sha=${result.commit_sha || 'yok'}, embedding=${embedding ? 'var' : 'YOK (Ollama erişilemedi — BM25-only)'}).`;
+  return `knowledge kaydedildi (id=${result.id}, topic=${result.topic}, commit_sha=${result.commit_sha || 'yok'}).`;
 }
 
-// knowledge_search — hibrit BM25+cosine arama. Sorgu embedding'i best-effort
-// (Ollama kapalıysa null, arama sadece BM25 ile devam eder — asla boş dönmez
-// diye değil, asla ÇÖKMEZ diye).
+// knowledge_search — SQLite FTS5 (BM25) tam metin araması.
 async function toolKnowledgeSearch(args) {
   const cwd = process.cwd();
-  const queryEmbedding = args.query ? await ollamaEmbed.embed(String(args.query)) : null;
   const results = knowledgeStore.searchKnowledge({
     query: args.query,
     topic: args.topic,
     category: args.category,
     status: args.status,
     limit: args.limit,
-    queryEmbedding,
   }, cwd);
   return JSON.stringify({ count: results.length, results }, null, 2);
 }
@@ -498,11 +487,8 @@ function handleMessage(msg) {
         return;
       }
       // Promise.resolve(...).then(handler) hem sync (ask_orchestrator,
-      // list_pending_questions, answer_question, get_result — dönüş değeri
-      // otomatik resolved promise'e sarılır) hem async (submit_result,
-      // knowledge_write/search — Ollama'ya fetch attığı için Promise döner)
-      // handler'ları TEK yolda karşılar — cevap ikisinde de burada, tools/call
-      // dönünce değil, promise çözülünce gönderilir.
+      // list_pending_questions, answer_question, get_result) hem async (submit_result,
+      // knowledge_write, knowledge_search) handler'ları TEK yolda karşılar.
       Promise.resolve()
         .then(() => handler(args))
         .then(

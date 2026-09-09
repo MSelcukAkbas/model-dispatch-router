@@ -55,7 +55,6 @@ function getDb() {
       verification_count INTEGER NOT NULL DEFAULT 0,
       supporting_tasks TEXT NOT NULL DEFAULT '[]',
       superseded_by INTEGER,
-      embedding BLOB,
       created_at TEXT NOT NULL,
       last_verified_commit TEXT,
       last_verified_at TEXT
@@ -112,22 +111,6 @@ function isDirty(cwd, file) {
   }
 }
 
-function floatsToBlob(arr) {
-  if (!arr) return null;
-  const buf = Buffer.from(new Float32Array(arr).buffer);
-  return buf;
-}
-function blobToFloats(buf) {
-  if (!buf) return null;
-  const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-  return Array.from(new Float32Array(ab));
-}
-function cosine(a, b) {
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-  return dot; // bge-m3 çıktısı zaten normalize (norm=1), dot = cosine
-}
-
 // evidence: [{file, line}], cwd: RUN_DIR (readonly roller ana checkout, writer
 // roller worktree — process.cwd() dispatch.sh'ın `cd "$RUN_DIR"`'ından miras).
 function buildEvidence(cwd, evidence) {
@@ -140,7 +123,7 @@ function buildEvidence(cwd, evidence) {
 }
 
 /**
- * @param {object} args {topic, category, claim, evidence, scope, source_task, source_role, embedding}
+ * @param {object} args {topic, category, claim, evidence, scope, source_task, source_role}
  * @param {string} cwd RUN_DIR — commit_sha/dirty hesaplaması buradan
  */
 function insertKnowledge(args, cwd) {
@@ -156,14 +139,13 @@ function insertKnowledge(args, cwd) {
 
   const evidence = buildEvidence(cwd, args.evidence);
   const commitSha = getCommitSha(cwd);
-  const embedding = floatsToBlob(args.embedding);
 
   const database = getDb();
   const stmt = database.prepare(`
     INSERT INTO knowledge
       (topic, category, claim, evidence, scope, commit_sha, source_task, source_role,
-       status, verification_count, supporting_tasks, embedding, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'candidate', 0, ?, ?, ?)
+       status, verification_count, supporting_tasks, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'candidate', 0, ?, ?)
   `);
   const info = stmt.run(
     topic,
@@ -175,7 +157,6 @@ function insertKnowledge(args, cwd) {
     args.source_task || null,
     args.source_role || null,
     JSON.stringify(args.source_task ? [args.source_task] : []),
-    embedding,
     new Date().toISOString(),
   );
   return { id: Number(info.lastInsertRowid), topic, commit_sha: commitSha, evidence };
@@ -201,13 +182,8 @@ function commitsSinceEvidence(cwd, commitSha, evidence) {
 }
 
 // FTS5'in varsayılan MATCH semantiği çok kelimeli bir sorgudaki TÜM
-// kelimelerin aynı satırda geçmesini şart koşar (implicit AND) — 2026-08-23
-// A live test found that multi-word concepts can be split into noisy tokens,
-// doğal-dil bir sorgu, kayıtta "failure"/"cascade" geçmediği için sıfır
-// sonuç döndürdü, halbuki topic tam eşleşiyordu. Kelimeleri OR ile
-// birleştirmek herhangi bir kelimenin eşleşmesini yeterli kılar — BM25
-// sıralaması zaten daha çok terim eşleşen satırı öne çıkarır, OR'a
-// geçmek doğruluğu değil sadece geri-çağırmayı (recall) artırır.
+// kelimelerin aynı satırda geçmesini şart koşar (implicit AND) —
+// Kelimeleri OR ile birleştirmek herhangi bir kelimenin eşleşmesini yeterli kılar.
 function buildFtsOrQuery(rawQuery) {
   const terms = String(rawQuery || '')
     .trim()
@@ -218,7 +194,7 @@ function buildFtsOrQuery(rawQuery) {
 }
 
 /**
- * @param {object} args {query, topic, category, status, limit, queryEmbedding}
+ * @param {object} args {query, topic, category, status, limit}
  * @param {string} cwd freshness hesaplaması için
  */
 function searchKnowledge(args, cwd) {
@@ -228,97 +204,41 @@ function searchKnowledge(args, cwd) {
   const category = args.category || null;
   const status = args.status || null;
 
-  // "k." prefix ZORUNLU (2026-08-23 bug fix, canlı testte bulundu): FTS
-  // dalı knowledge_fts ile JOIN yapıyor ve o tablo da bir `topic` sütunu
-  // taşıyor — prefixsiz "topic LIKE ?" iki tablo arasında belirsiz kalıp
-  // "ambiguous column name: topic" hatası fırlatıyordu, dıştaki try/catch
-  // bunu yutup sessizce BOŞ SONUÇ döndürüyordu (topic+query birlikte
-  // verildiğinde arama sessizce hep sıfır dönüyordu — sadece topic-only ya
-  // da query-only ayrı ayrı çalıştığı için önceki testler bunu kaçırdı).
   const where = [];
   const params = [];
   if (topicFilter) { where.push('k.topic LIKE ?'); params.push(`${topicFilter}%`); }
   if (category) { where.push('k.category = ?'); params.push(category); }
   if (status) { where.push('k.status = ?'); params.push(status); }
   else { where.push("k.status != 'superseded'"); } // varsayılan: açıkça istenmedikçe superseded'ı gizle
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  // Filtrelenmiş havuz (SADECE topic/category/status — query DEĞİL): hem
-  // BM25 hem cosine bu havuzdan bağımsız aday üretir. POOL_CAP şimdilik
-  // sabit — mevcut ölçekte (birkaç yüz kayıt) tüm havuzu cosine ile taramak
-  // bedava; ANN indeksi ancak çok daha büyük ölçekte gerekir (SKILL.md'de
-  // bilerek ertelendi).
-  const POOL_CAP = 500;
-  const filteredRows = database
-    .prepare(`SELECT * FROM knowledge k ${whereSql} ORDER BY id DESC LIMIT ${POOL_CAP}`)
-    .all(...params);
+  let rows = [];
+  const searchAttempted = Boolean(args.query && String(args.query).trim());
 
-  // 2026-08-24 bug fix (bağımsız model incelemesinde bulundu): eski kod
-  // embedding'i sadece BM25'in ürettiği `candidates` üzerinde re-rank
-  // olarak kullanıyordu — BM25 sıfır aday döndürürse (kelime örtüşmesi
-  // yoksa) embedding'in hiç devreye girme şansı olmuyordu. Canlı kanıt:
-  // "trafik almayan servis" (kelime örtüşüyor) 1 sonuç buldu, anlamsal
-  // olarak AYNI kaydı tarif eden "hangi mikroservis kimseden istek almıyor
-  // boşta duruyor" (kelime örtüşmüyor) 0 sonuç döndürdü — GPU'da embedding
-  // hesaplanıyordu ama aramaya hiç katkısı yoktu. Düzeltme: cosine artık
-  // TÜM filtrelenmiş havuz üzerinde KENDİ bağımsız sıralamasını üretiyor,
-  // RRF iki sıralamanın KESİŞİMİNİ değil BİRLEŞİMİNİ (union) alıyor.
-  const bm25Rank = new Map();
-  if (args.query && String(args.query).trim()) {
+  if (searchAttempted) {
     const ftsQuery = buildFtsOrQuery(args.query);
-    try {
-      const rows = database.prepare(`
-        SELECT k.id, bm25(knowledge_fts) AS bm25_score
-        FROM knowledge k JOIN knowledge_fts ON knowledge_fts.rowid = k.id
-        WHERE knowledge_fts MATCH ? ${where.length ? 'AND ' + where.join(' AND ') : ''}
-        ORDER BY bm25_score LIMIT 100
-      `).all(ftsQuery, ...params);
-      rows.forEach((r, i) => bm25Rank.set(r.id, i));
-    } catch {
-      // FTS sözdizimi hatası (özel karakter vb.) — sessizce sıfır BM25 aday,
-      // embedding hâlâ kendi havuzunu üretebilir (fail-soft).
+    if (ftsQuery) {
+      try {
+        const whereSql = where.length ? 'AND ' + where.join(' AND ') : '';
+        rows = database.prepare(`
+          SELECT k.*, bm25(knowledge_fts) AS bm25_score
+          FROM knowledge k JOIN knowledge_fts ON knowledge_fts.rowid = k.id
+          WHERE knowledge_fts MATCH ? ${whereSql}
+          ORDER BY bm25_score LIMIT ?
+        `).all(ftsQuery, ...params, limit);
+      } catch {
+        // FTS sözdizimi hatası durumunda boş dön
+        rows = [];
+      }
     }
-  }
-
-  const cosRank = new Map();
-  if (args.queryEmbedding) {
-    filteredRows
-      .map((row) => {
-        const emb = blobToFloats(row.embedding);
-        return emb ? { id: row.id, sim: cosine(args.queryEmbedding, emb) } : null;
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.sim - a.sim)
-      .slice(0, 100) // BM25 ile simetrik üst sınır
-      .forEach((x, i) => cosRank.set(x.id, i));
-  }
-
-  // "Arama denendi ama sıfır eşleşme" ile "hiç arama istenmedi" AYRI
-  // tutulmalı (2026-08-24, kendi düzeltmemi test ederken bulundu — ilk
-  // versiyon bm25Rank/cosRank ikisi de boşsa "sorgu verilmedi" varsayıp
-  // TÜM veritabanını döndürüyordu; gerçek bir sorgu hiçbir şeyle eşleşmezse
-  // bu YANLIŞ — boş sonuç dönmeli, tüm tabloya düşmemeli).
-  const searchAttempted = Boolean(args.query && String(args.query).trim()) || Boolean(args.queryEmbedding);
-  const rowById = new Map(filteredRows.map((r) => [r.id, r]));
-  let orderedIds;
-  if (!searchAttempted) {
-    // Ne query ne queryEmbedding verildi — salt topic/category/status
-    // filtresiyle "gözat" modu, filtrelenmiş havuzu id DESC döndür.
-    orderedIds = filteredRows.map((r) => r.id);
   } else {
-    const unionIds = new Set([...bm25Rank.keys(), ...cosRank.keys()]);
-    orderedIds = [...unionIds]
-      .map((id) => ({
-        id,
-        rrf: 1 / (60 + (bm25Rank.get(id) ?? 10000)) + 1 / (60 + (cosRank.get(id) ?? 10000)),
-      }))
-      .sort((a, b) => b.rrf - a.rrf)
-      .map((x) => x.id);
+    // Salt filtreli gözat (browse) modu
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    rows = database.prepare(`
+      SELECT k.* FROM knowledge k ${whereSql} ORDER BY id DESC LIMIT ?
+    `).all(...params, limit);
   }
 
-  const ranked = orderedIds.map((id) => rowById.get(id)).filter(Boolean);
-
-  return ranked.slice(0, limit).map((row) => {
+  return rows.map((row) => {
     const evidence = JSON.parse(row.evidence || '[]');
     const commits_since_evidence = commitsSinceEvidence(cwd, row.commit_sha, evidence);
     return {
