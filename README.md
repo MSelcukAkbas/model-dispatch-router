@@ -29,37 +29,28 @@ Karmaşık yazılım projelerinde tek bir modelin her işi yapmaya çalışması
 Aşağıdaki şema, bir görevin ana orkestratörden çıkıp alt ajanlar tarafından işlenmesini ve güvenle ana depoya dahil edilmesini gösterir:
 
 ```mermaid
-flowchart LR
-    Host["🖥️ <b>Host Orkestratör</b><br/>Claude Code · Codex · agy"]
-    Router["⚡ <b>Model Dispatch Route</b><br/>Bütçe, Kota & Worktree"]
+flowchart TD
+    Host["Host Orkestratör: Claude Code / Codex / Antigravity"]
+    Router["Model Dispatch Route: Bütçe, Kota ve Worktree Yönetimi"]
 
-    subgraph Swarm ["🤖 <b>Uzman Ajan Havuzu</b>"]
-        direction TB
-        A1["🔨 Backend / SDK <i>(Sonnet)</i>"]
-        A2["🔍 Research / Scan <i>(Haiku)</i>"]
-        A3["⚖️ Judge / Architecture <i>(Opus)</i>"]
-        A4["🚀 Ops / SSH MCP <i>(Sonnet)</i>"]
+    subgraph Swarm["Uzman Ajan Havuzu (Multi-Agent Swarm)"]
+        direction LR
+        A_Backend["Backend / SDK\nSonnet"]
+        A_Design["Design / UI\nSonnet"]
+        A_Research["Research / Scan\nHaiku"]
+        A_Judge["Judge / Mimari\nOpus"]
+        A_Ops["Ops / SSH MCP\nSonnet"]
     end
 
-    Review["🛡️ <b>İnceleme & Onay</b><br/>diff.sh ➔ apply.sh"]
-    Memory[("🧠 <b>AgentMind Memory</b><br/>Gate ➔ Graphify ➔ SQLite")]
+    Review["Orkestratör Kontrolü: diff.sh -> apply.sh"]
+    Memory[("AgentMind Paylaşımlı Hafıza: Gate -> Graphify -> SQLite")]
 
-    Host -->|"Görev Ver"| Router
-    Router -->|"İzole Çalıştır"| Swarm
-    Swarm -->|"Yama Üret"| Review
-    Review -->|"Birleştir"| Host
-    Review -.->|"Doğrula"| Memory
-    Memory -.->|"Bağlam Sağla"| Router
-
-    classDef hostStyle fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
-    classDef agentStyle fill:#1e293b,stroke:#64748b,stroke-width:1px,color:#f8fafc;
-    classDef reviewStyle fill:#0f172a,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
-    classDef memoryStyle fill:#0f172a,stroke:#10b981,stroke-width:2px,color:#f8fafc;
-
-    class Host,Router hostStyle;
-    class A1,A2,A3,A4 agentStyle;
-    class Review reviewStyle;
-    class Memory memoryStyle;
+    Host -->|"1. Görev Ver"| Router
+    Router -->|"2. İzole Sandbox"| Swarm
+    Swarm -->|"3. Yama Üret"| Review
+    Review -->|"4. Birleştir"| Host
+    Review -.->|"5. Doğrula"| Memory
+    Memory -.->|"Önceki Bağlam"| Router
 ```
 
 ---
