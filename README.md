@@ -28,41 +28,17 @@ Karmaşık yazılım projelerinde tek bir modelin her işi yapmaya çalışması
 
 Aşağıdaki şema, bir görevin ana orkestratörden çıkıp alt ajanlar tarafından işlenmesini ve güvenle ana depoya dahil edilmesini gösterir:
 
-```text
-                  ┌─────────────────────────────────────────┐
-                  │      🖥️  HOST ORKESTRATÖR (Host)        │
-                  │   Claude Code · Codex · Antigravity     │
-                  └────────────────────┬────────────────────┘
-                                       │ 1. Görevi Tanımla (Goal & Files)
-                                       ▼
-                  ┌─────────────────────────────────────────┐
-                  │       ⚡  MODEL DISPATCH ROUTE          │
-                  │   Bütçe, Kota & Worktree Sandboxing     │
-                  └────────────────────┬────────────────────┘
-                                       │ 2. İzole Sandbox Çalıştır
-         ┌─────────────────────────────┴─────────────────────────────┐
-         │                                                           │
-         ▼                                                           ▼
-┌─────────────────────────────────────────────────┐        ┌──────────────────┐
-│          🤖  UZMAN AJAN HAVUZU (SWARM)          │        │  🧠 AGENTMIND    │
-├─────────────────────────────────────────────────┤        │  PAYLAŞIMLI      │
-│ 🔨 Backend / SDK   (Sonnet · Yüksek Efor)       │        │  HAFIZA          │
-│ 🎨 Design / UI     (Sonnet · Yüksek Efor)       ├───────►│                  │
-│ 🔍 Research / Scan (Haiku  · Düşük Efor)        │        │ • Event Log (SQL)│
-│ ⚖️ Judge / Mimari   (Opus   · Karar Odaklı)      │        │ • Code Graph     │
-│ 🚀 Ops / SSH MCP   (Sonnet · Canlı Teşhis)      │        │ • Freshness Gate │
-└────────────────────────┬────────────────────────┘        └─────────┬────────┘
-                         │ 3. Yamayı Üret                            │
-                         ▼                                           │
-                  ┌─────────────────────────────────────────┐        │
-                  │      🛡️  İNCELEME & ONAY (Review)       │        │
-                  │         diff.sh  ➔  apply.sh            │◄───────┘
-                  └────────────────────┬────────────────────┘   Doğrula &
-                                       │ 4. Ana Dala Birleştir  Bağlam Sağla
-                                       ▼
-                  ┌─────────────────────────────────────────┐
-                  │      🎉  GÜVENLİ ANA ÇALIŞMA AĞACI      │
-                  └─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Host["Host Orkestratör: Claude Code / Codex / Antigravity"]
+    Router["Model Dispatch Route: Görev Yönlendirme & Worktree"]
+    Agents["Multi-Agent Çalışan Modeller (Uzman Ajanlar)"]
+    Memory[("AgentMind Ortak Hafıza: Code Graph, SQLite & Gate")]
+
+    Host -->|"1. Görev Tanımla"| Router
+    Router -->|"2. İzole Sandbox Çalıştır"| Agents
+    Agents <-->|"3. Ortak Hafıza Erişimi & Doğrulama"| Memory
+    Agents -->|"4. Onaylanan Çözüm & Yama"| Host
 ```
 
 ---
