@@ -1,161 +1,224 @@
-# 🧠 AgentMind + Model Dispatch Route
+# ⚡ Model Dispatch Route
 
-> **Otonom Ajanlar için Kod Grafı Destekli Hafıza ve Doğrulamalı Multi-Agent Orkestrasyon Çekirdeği**
+> **Otonom Orkestratörler (Claude Code, Codex, Antigravity) için Bütçeli, İzole ve Doğrulamalı Çoklu Ajan (Multi-Agent) Yönlendirme Motoru**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Multi--Agent: Swarm](https://img.shields.io/badge/Multi--Agent-Worktree%20Isolated-blueviolet.svg)](#-multi-agent-mimari-ve-roller)
 [![CI](https://github.com/MSelcukAkbas/model-dispatch-route/actions/workflows/ci.yml/badge.svg)](https://github.com/MSelcukAkbas/model-dispatch-route/actions)
-[![Platform](https://img.shields.io/badge/Platform-Claude%20Code%20%7C%20Codex%20%7C%20Antigravity-orange.svg)](#-platform-entegrasyonu)
 
 ---
 
-## ⚡ Problem & Vizyon
+## 🎯 Temel Felsefe: Neden Multi-Agent Dispatch?
 
-Standart yapay zekâ ajanları **oturumlar arasında unutur**, birbirlerinin bulgularından haberdar olamaz ve kod tabanında oluşturdukları varsayımları (halüsinasyonları) sorgusuz sualsiz doğru kabul edebilir.
+Karmaşık yazılım projelerinde tek bir modelin her işi yapmaya çalışması üç büyük darboğaz yaratır:
+1. **Bağlam Şişmesi (Context Bloat):** Tek bir oturuma binlerce satır kod yüklendiğinde modelin odaklanma ve muhakeme kalitesi düşer.
+2. **Kota ve Maliyet Patlaması:** Basit bir kod arama veya dosya tarama için en pahalı modelin token kotasını harcamak kaynak israfıdır.
+3. **Doğrudan Müdahale Riski:** Bir alt ajanın ana çalışma dizininde doğrudan `git commit` veya kontrolsüz dosya değişiklikleri yapması projeyi bozabilir.
 
-**AgentMind + Model Dispatch Route**, bu sorunu kökten çözer:
-- 🧩 **Kod Grafı ile Yaşayan Hafıza:** Ajanların iddialarını kod semantiğine (AST / çağrı grafı) bağlar. Kod geliştikçe veya değiştikçe geçerliliğini yitiren iddialar anında `stale` durumuna düşer.
-- 🚦 **Doğrulama Kapısı (Verification Gate):** Hiçbir iddia peşinen doğru kabul edilmez. Alt ajanların ürettiği bulgular önce `candidate` (aday) olarak etiketlenir; yalnızca testlerden veya derleme kontrollerinden geçenler `verified` statüsüne terfi ettirilir.
-- 🛡️ **İzole Çalışma Ağaçları (Worktree Sandboxing):** Alt modeller doğrudan ana deponuzda değişiklik yapmaz; izole Git worktree'lerinde çalışır. Orkestratör değişiklikleri inceler (`diff`) ve onaylarsa birleştirir (`apply`).
+**Model Dispatch Route**, ana orkestratörü (Claude Code / Codex / Antigravity) bir **"Baş Mimar"** konumuna yerleştirir:
+- 🔀 **Uzman Ajanlara Görev Delege Etme:** İşin niteliğine göre en uygun model ve efor seviyesi seçilir (kodlama için Sonnet, derin analiz için Opus, hızlı tarama için Haiku/Flash).
+- 🛡️ **İzole Git Worktree Alanı:** Her alt ajan bağımsız bir Git worktree içinde çalışır. Ana çalışma dizininize doğrudan dokunamaz.
+- 🔍 **Orkestratör Kontrolünde Birleştirme:** Alt ajanın ürettiği değişiklikler önce `diff.sh` ile incelenir, orkestratör onay verirse `apply.sh` ile ana dala uygulanır.
+- 🧠 **AgentMind Paylaşımlı Hafıza Çekirdeği:** Ajanlar arası bilgi aktarımı sağlar; üretilen bulguları kod grafına (Graphify) mühürler ve testlerden geçmeyen iddiaları doğrulanmış saymaz (`Verification Gate`).
 
 ---
 
 ## 🏗️ Sistem Mimarisi
 
+Aşağıdaki şema, bir görevin ana orkestratörden çıkıp alt ajanlar tarafından işlenmesini ve güvenle ana depoya dahil edilmesini gösterir:
+
 ```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'background': '#0f172a',
+    'primaryColor': '#1e293b',
+    'primaryTextColor': '#f8fafc',
+    'primaryBorderColor': '#475569',
+    'lineColor': '#94a3b8',
+    'secondaryColor': '#1e293b',
+    'tertiaryColor': '#0f172a',
+    'clusterBkg': '#090d16',
+    'clusterBorder': '#334155'
+  }
+}}%%
 flowchart TD
-    subgraph Hosts["🖥️ Orkestratör Host Ortamları"]
-        H1["Claude Code"]
-        H2["Codex"]
-        H3["Antigravity (agy)"]
+    subgraph HostGroup["🖥️ ANA ORKESTRATÖR (Host)"]
+        Host["Claude Code / Codex / Antigravity<br/><i>(Baş Mimar — Hedefi Belirler)</i>"]
     end
 
-    subgraph DispatchCore["⚡ Model Dispatch Route"]
-        Router["Persona Router & Bütçe Denetimi"]
-        Worktree["Git Worktree İzolasyonu"]
+    subgraph RouterGroup["⚡ MULTI-AGENT ROUTE & ISOLATION"]
+        Router["<b>dispatch.sh</b><br/><i>(Rol, Kota, Bütçe & Efor Yönlendirme)</i>"]
+        Worktree["<b>Git Worktree Sandbox</b><br/><i>(Her Göreve İzole Dal: .worktrees/T-XXXXXX)</i>"]
     end
 
-    subgraph Agents["🤖 Uzman Ajan Personaları"]
-        A_Backend["Backend (Sonnet / GPT-4o)"]
-        A_Research["Research (Haiku / Flash)"]
-        A_Judge["Judge / Doğrulama"]
-        A_Ops["Ops / SSH MCP"]
+    subgraph AgentGroup["🤖 UZMAN AJAN PERSONA HAVUZU"]
+        A_Backend["🔨 <b>Backend / SDK</b><br/>Sonnet · Yüksek Efor<br/><i>Kod Üretimi & Test</i>"]
+        A_Design["🎨 <b>Design</b><br/>Sonnet · Yüksek Efor<br/><i>UI / Frontend / Stil</i>"]
+        A_Research["🔍 <b>Research</b><br/>Haiku / Flash · Düşük Efor<br/><i>Grep / Glob / Hızlı Tarama</i>"]
+        A_Judge["⚖️ <b>Judge</b><br/>Opus · Yüksek Efor<br/><i>Karar & Mimari Hakemlik</i>"]
+        A_Ops["🚀 <b>Ops</b><br/>Sonnet · SSH MCP<br/><i>Sunucu & Canlı Teşhis</i>"]
     end
 
-    subgraph MemoryGate["🧠 AgentMind Memory & Doğrulama"]
-        Gate["Verification Gate (am gate)"]
-        Freshness["Freshness Engine (Zaman Aşımı / Hash)"]
-        Graph["Code Graph Overlay (Graphify)"]
-        Store[("SQLite Event Log & Snapshot Store")]
+    subgraph ReviewGroup["🛡️ ORKESTRATÖR ONAYI & ENTEGRASYON"]
+        DiffCheck["<b>diff.sh</b><br/><i>(Yamayı İncele)</i>"]
+        ApplyPatch["<b>apply.sh</b><br/><i>(Ana Çalışma Ağacına Uygula)</i>"]
     end
 
-    Hosts -->|"SessionStart / Görev Tetikleme"| Router
-    Router --> Worktree
-    Worktree --> Agents
-    Agents -->|"Çıktı & Bulgular (Candidate)"| Gate
-    Gate -->|"Test Başarılı (--promote)"| Freshness
-    Freshness --> Graph
-    Graph --> Store
-    Store -.->|"İlgili Bağlam (Context Injection)"| Router
+    subgraph MemoryGroup["🧠 ORTAK BİLGİ DÜZLEMİ (AgentMind)"]
+        Gate["<b>Verification Gate</b><br/><i>(Test ve Doğrulama Kontrolü)</i>"]
+        Knowledge[("<b>Code Graph & Memory</b><br/><i>(SQLite + Graphify Overlay)</i>")]
+    end
+
+    Host -->|"1. Görevi Tanımla (Goal & Files)"| Router
+    Router -->|"2. Sandbox Oluştur"| Worktree
+    Worktree -->|"3. İşi Delege Et"| AgentGroup
+    AgentGroup -->|"4. Yamayı Üret"| DiffCheck
+    DiffCheck -->|"5. Onayla & Birleştir"| ApplyPatch
+    ApplyPatch -->|"6. Ana Ağaca Aktar"| Host
+
+    AgentGroup -.->|"Aday Bulguları İlet"| Gate
+    Gate -->|"Doğrulanan Bilgi"| Knowledge
+    Knowledge -.->|"Sonraki Göreve Bağlam Aktar"| Router
+
+    classDef hostStyle fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef routerStyle fill:#1e293b,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
+    classDef agentStyle fill:#182234,stroke:#64748b,stroke-width:1px,color:#f8fafc;
+    classDef reviewStyle fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
+    classDef memoryStyle fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#f8fafc;
+
+    class Host hostStyle;
+    class Router,Worktree routerStyle;
+    class A_Backend,A_Design,A_Research,A_Judge,A_Ops agentStyle;
+    class DiffCheck,ApplyPatch reviewStyle;
+    class Gate,Knowledge memoryStyle;
 ```
 
 ---
 
-## 🚀 Öne Çıkan Süper Güçler
+## 🤖 Multi-Agent Rol Matrisi
 
-### 1. Sıfır Halüsinasyonlu Doğrulama Kapısı (Verification Gate)
-Ajanların sunduğu hiçbir çözüm veya iddia körü körüne kabul edilmez:
+Model Dispatch Route, görevleri rastgele bir modele göndermek yerine her rolün yetki ve kaynak sınırlarını katı kurallarla belirler:
+
+| Rol | Varsayılan Model | Yetki Sınırları | Efor Seviyesi | Kullanım Alanı |
+|---|---|---|---|---|
+| **`backend`** | Sonnet | Tam Yazma / Terminal | `high` | Çekirdek iş mantığı, API geliştirme, birim testleri |
+| **`design`** | Sonnet | Tam Yazma | `high` | UI/UX, CSS, bileşen düzenlemeleri, görsel estetik |
+| **`sdk`** | Sonnet | Tam Yazma | `high` | Harici kütüphane, SDK ve istemci kodları |
+| **`research`** | Haiku / Flash | **Salt Okunur** (Read / Grep / Glob) | `low` | Büyük depolarda hızlı kod tarama, referans arama (çok ucuz) |
+| **`judge`** | Opus | **Salt Okunur** (Karar Odaklı) | `high` | Kritik mimari kararlar, çelişki çözümü, tasarım incelemesi |
+| **`ops`** | Sonnet | SSH MCP / Terminal (Dosya Yazma Yok) | `high` | Uzak sunucu teşhisi, konteyner yönetimi, canlı ortam kontrolleri |
+| **`general`** | Sonnet | Tam Yazma | `medium` | Dokümantasyon, konfigürasyon, görev takip dosyaları |
+
+---
+
+## ⚡ Multi-Agent Çalışma Akışı (Lifecycle)
+
+### 1. Görevi Hazırlayın (`prompt.md`)
+Her görevin en başında **tek bir net hedef** ve isteğe bağlı **hedef dosyalar** tanımlanır:
+```markdown
+# GOAL: Auth middleware'ine JWT token doğrulama mantığını ekle ve testlerini yaz
+# FILES: src/middleware/auth.ts,tests/auth.test.ts
+
+Detaylı gereksinimler...
+```
+
+### 2. Ajanı Göreve Gönderin (`dispatch.sh`)
 ```bash
-# Görevi otomatik çalıştır, test et ve doğrulanırsa hafızaya terfi ettir
-am gate <task_id> --check "pytest tests/test_core.py" --promote
+# Backend ajanı izole bir worktree içinde işe başlar
+bash skills/model-dispatch-route/scripts/dispatch.sh backend TASK-101 prompt.md --timeout 20
 ```
-Eğer hedef dosyalarda commit'lenmemiş değişiklikler varsa veya test başarısızsa iddia reddedilir.
+- `.worktrees/TASK-101` dizini otomatik oluşturulur.
+- İlgili modele özel persona yüklenir.
+- Kota ve token bütçesi arka planda (`quota-watch.sh`) denetlenir.
 
-### 2. Canlı ve Kendi Kendini Temizleyen Kod Hafızası (Freshness)
-AgentMind, iddiaları dosya hash'leri ve semantik AST düğümleriyle mühürler. Başka bir ajan dosyayı değiştirdiğinde, eski bilgiye dayanan tüm kararlar anında geçersiz kılınır.
+### 3. Değişiklikleri İnceleyin (`diff.sh`)
+Alt ajan işini bitirdiğinde ana deponuz bozulmaz. Üretilen yamayı orkestratör terminalinden inceleyin:
+```bash
+bash skills/model-dispatch-route/scripts/diff.sh TASK-101
+```
 
-### 3. Fail-Open Orkestrasyon
-AgentMind veya alt hafıza servisi geçici olarak ulaşılamaz olsa bile ana orkestrasyon (`dispatch`) kilitlenmez; uyarı verir ve işlemi kesintisiz tamamlar.
-
-### 4. Bütçe ve Kota Gözetimi (`quota-watch`)
-Her alt modele rolüne göre token veya dolar bütçesi atanır (`maxBudgetUsd`). Bütçesini aşan veya sonsuz döngüye giren modeller otomatik durdurulur.
+### 4. Güvenle Birleştirin (`apply.sh`) veya Reddedin
+```bash
+# Değişiklikleri ana çalışma ağacına aktar ve worktree'yi temizle
+bash skills/model-dispatch-route/scripts/apply.sh TASK-101
+```
 
 ---
 
-## 📦 Kurulum ve Hızlı Başlangıç
+## 🧠 Ortak Hafıza & Doğrulama Kapısı (AgentMind)
+
+Multi-agent sistemlerinde ajanların birbirinin yaptığı işlerden haberdar olması için AgentMind bir arka plan bellek motoru olarak çalışır:
+
+* **Sıfır Halüsinasyon (`am gate`):** Alt ajanın "Bu sorunu çözdüm" şeklindeki iddiası hemen doğru sayılmaz (`candidate`). Ancak testten geçerse doğrulanır:
+  ```bash
+  am gate TASK-101 --check "npm test" --promote
+  ```
+* **Otomatik Geçersiz Kılma (Freshness):** Doğrulanan bilgi, dayandığı dosyaların hash'i ile mühürlenir. İlgili dosyalar gelecekte değiştiğinde eski iddia anında `stale` statüsüne düşer.
+* **Fail-Open Garantisi:** Hafıza servisi geçici olarak kapalı olsa dahi model dispatch akışı kilitlenmez; uyarı vererek çalışmaya devam eder.
+
+---
+
+## 📦 Kurulum
 
 ### Gereksinimler
 - Python `>=3.12, <3.13`
-- [uv](https://docs.astral.sh/uv/) (hızlı Python paket yöneticisi)
-- Git ve Node.js `>=18`
+- [uv](https://docs.astral.sh/uv/)
+- Git ve Bash / Zsh (Windows için Git Bash / WSL veya macOS/Linux)
 
-### 1. AgentMind Çekirdeğini Kurun
 ```bash
-# Python çekirdeğini ve graf eklentisini kurun
+# 1. AgentMind CLI ve bellek çekirdeğini kurun
 uv tool install --editable "./skills/model-dispatch-route/mcp/agentmind[graph]" --force
-```
 
-### 2. Platform Kancalarını (Hooks) Aktif Edin
-Tek komutla desteklenen tüm araçlarınıza (`Claude Code`, `Codex`, `Antigravity`) bellek yaşam döngüsü kancalarını entegre edin:
-```bash
-# Tüm platformlar için kancaları bağlayın
+# 2. Kullandığınız host platformlara (Claude Code, Codex, Antigravity) kancaları bağlayın
 am hooks-install . --platform all
-```
 
-> **Not:** Kanca yükleyici mevcut ayarlarınızı ezmez; AgentMind oturum kancalarını akıllıca birleştirir.
-
-### 3. Konfigürasyonu Özelleştirin
-Şablon yapılandırmayı projenizin kök dizinine kopyalayın:
-```bash
+# 3. Model yapılandırmasını kopyalayın
 cp packaging/agentmind-model-dispatch-route/examples/model-dispatch-route.example.json .model-dispatch-route.json
 ```
 
 ---
 
-## 🎮 Platform Entegrasyonu
+## 🎮 Platform Uyumluluğu
 
-| Platform | Entegrasyon Tipi | Konum / Dosya | Yetenekler |
-|---|---|---|---|
-| **Antigravity (`agy`)** | Eklenti Manifesti / Hooks | `.agents/plugins/marketplace.json` | Oturum öncesi hafıza yükleme, arka plan alt-ajan dispatch |
-| **Claude Code** | Session Lifecycle Hooks | `.claude/settings.json` | Oturum başlangıcı/bitişi bellek senkronizasyonu |
-| **Codex** | Codex Plugin / Hooks | `.codex/hooks.json` | Otonom rol yönlendirme, worktree sandbox |
+| Platform | Entegrasyon Yöntemi | Sağlanan Yetenekler |
+|---|---|---|
+| **Antigravity (`agy`)** | `.agents/plugins/marketplace.json` | Skill entegrasyonu, arka plan alt-ajan yönetimi, memory injection |
+| **Claude Code** | `.claude/settings.json` | `SessionStart` / `SessionEnd` bellek kancaları, persona bazlı dispatch |
+| **Codex** | `.codex/hooks.json` | Eklenti manifesti, izole sandbox yürütme |
 
 ---
 
-## 📂 Dizin Mimarisi
+## 📂 Dizin Ağacı
 
 ```
-agentmind/
-├── skills/model-dispatch-route/       # 🧠 Ana Skill & Orkestrasyon Çekirdeği
-│   ├── SKILL.md                      # Skill spesifikasyonu & agent talimatları
-│   ├── personas/                     # Rol tanımları (backend, judge, research, ops, agy)
-│   ├── scripts/                      # Dispatch, worktree, diff & apply betikleri
-│   ├── mcp/agentmind/                # Python çekirdeği (SQLite, Graphify, CLI, Server)
-│   └── mcp/bridge/                   # Node.js Agent Bridge & Ollama embedding köprüsü
-├── packaging/                         # 📦 Dağıtım & Eklenti Paketleme
+model-dispatch-route/
+├── skills/model-dispatch-route/       # ⚡ Core Multi-Agent Motoru
+│   ├── SKILL.md                      # Ajan koordinasyon yönergeleri
+│   ├── personas/                     # Ajan rolleri (backend, design, judge, ops, research)
+│   ├── scripts/                      # dispatch.sh, diff.sh, apply.sh, status.sh
+│   ├── mcp/agentmind/                # Paylaşımlı hafıza çekirdeği (SQLite, Graphify, Gate)
+│   └── mcp/bridge/                   # Canlı ajan iletişim köprüsü
+├── packaging/                         # 📦 Dağıtım ve Eklenti Paketleme
 │   ├── agentmind-model-dispatch-route/ # Standart eklenti şablonu
-│   └── build.mjs                     # Dağıtılabilir eklenti derleyici
-├── references/                        # 🔗 Submodule & Harici Entegrasyonlar
-│   └── agentic-ssh-mcp               # SSH araçları entegrasyonu (Git Submodule)
-├── docs/                             # 📚 Mimari & Karar Dokümanları
-│   └── AGENTMIND_STATE.md            # Bellek motoru durum takibi
-├── .github/workflows/ci.yml           # 🧪 Çoklu platform (Linux & Windows) CI
+│   └── build.mjs                     # Dağıtım derleyicisi
+├── references/                        # 🔗 Submodule Entegrasyonları
+│   └── agentic-ssh-mcp               # Ops rolü için SSH araç seti
+├── docs/                             # 📚 Durum & Mimari Notları
+├── .github/workflows/ci.yml           # 🧪 Çoklu Platform CI (Linux & Windows)
 └── LICENSE                            # ⚖️ MIT Lisansı
 ```
 
 ---
 
-## 🧪 Test ve Kalite Güvencesi
+## 🧪 Testler
 
-Birim testlerini yerel ortamda çalıştırmak için:
 ```bash
-cd skills/model-dispatch-route/mcp/agentmind
-uv sync --extra graph --group dev
-uv run pytest -q
-```
+# Python çekirdeği birim testleri (103+ test)
+cd skills/model-dispatch-route/mcp/agentmind && uv run pytest -q
 
-Taze kullanıcı kurulumu duman testini (Smoke Test) çalıştırmak için:
-```bash
+# Uçtan uca kurulum duman testi
 bash skills/model-dispatch-route/scripts/smoke-test.sh
 ```
 
@@ -163,4 +226,4 @@ bash skills/model-dispatch-route/scripts/smoke-test.sh
 
 ## 📄 Lisans
 
-Bu proje **[MIT Lisansı](LICENSE)** ile lisanslanmıştır. Topluluk katkılarına, ticari ve bireysel kullanıma açıktır.
+Bu proje **[MIT Lisansı](LICENSE)** ile korunmaktadır. Ticari ve kişisel kullanıma tamamen açıktır.
