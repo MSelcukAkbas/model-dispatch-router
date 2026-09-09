@@ -5,6 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agentmind"
 version = "0.1.0"
+license = { text = "MIT" }
 description = "Orchestration kernel: one event log, one overlay graph and token-budgeted context over model-dispatch-route, graphify and agentic-ssh-mcp"
 readme = "README.md"
 keywords = ["agents", "orchestration", "code-graph", "memory", "mcp"]
