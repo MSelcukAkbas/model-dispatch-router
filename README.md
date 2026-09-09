@@ -28,29 +28,41 @@ Karmaşık yazılım projelerinde tek bir modelin her işi yapmaya çalışması
 
 Aşağıdaki şema, bir görevin ana orkestratörden çıkıp alt ajanlar tarafından işlenmesini ve güvenle ana depoya dahil edilmesini gösterir:
 
-```mermaid
-flowchart TD
-    Host["Host Orkestratör: Claude Code / Codex / Antigravity"]
-    Router["Model Dispatch Route: Bütçe, Kota ve Worktree Yönetimi"]
-
-    subgraph Swarm["Uzman Ajan Havuzu (Multi-Agent Swarm)"]
-        direction LR
-        A_Backend["Backend / SDK\nSonnet"]
-        A_Design["Design / UI\nSonnet"]
-        A_Research["Research / Scan\nHaiku"]
-        A_Judge["Judge / Mimari\nOpus"]
-        A_Ops["Ops / SSH MCP\nSonnet"]
-    end
-
-    Review["Orkestratör Kontrolü: diff.sh -> apply.sh"]
-    Memory[("AgentMind Paylaşımlı Hafıza: Gate -> Graphify -> SQLite")]
-
-    Host -->|"1. Görev Ver"| Router
-    Router -->|"2. İzole Sandbox"| Swarm
-    Swarm -->|"3. Yama Üret"| Review
-    Review -->|"4. Birleştir"| Host
-    Review -.->|"5. Doğrula"| Memory
-    Memory -.->|"Önceki Bağlam"| Router
+```text
+                  ┌─────────────────────────────────────────┐
+                  │      🖥️  HOST ORKESTRATÖR (Host)        │
+                  │   Claude Code · Codex · Antigravity     │
+                  └────────────────────┬────────────────────┘
+                                       │ 1. Görevi Tanımla (Goal & Files)
+                                       ▼
+                  ┌─────────────────────────────────────────┐
+                  │       ⚡  MODEL DISPATCH ROUTE          │
+                  │   Bütçe, Kota & Worktree Sandboxing     │
+                  └────────────────────┬────────────────────┘
+                                       │ 2. İzole Sandbox Çalıştır
+         ┌─────────────────────────────┴─────────────────────────────┐
+         │                                                           │
+         ▼                                                           ▼
+┌─────────────────────────────────────────────────┐        ┌──────────────────┐
+│          🤖  UZMAN AJAN HAVUZU (SWARM)          │        │  🧠 AGENTMIND    │
+├─────────────────────────────────────────────────┤        │  PAYLAŞIMLI      │
+│ 🔨 Backend / SDK   (Sonnet · Yüksek Efor)       │        │  HAFIZA          │
+│ 🎨 Design / UI     (Sonnet · Yüksek Efor)       ├───────►│                  │
+│ 🔍 Research / Scan (Haiku  · Düşük Efor)        │        │ • Event Log (SQL)│
+│ ⚖️ Judge / Mimari   (Opus   · Karar Odaklı)      │        │ • Code Graph     │
+│ 🚀 Ops / SSH MCP   (Sonnet · Canlı Teşhis)      │        │ • Freshness Gate │
+└────────────────────────┬────────────────────────┘        └─────────┬────────┘
+                         │ 3. Yamayı Üret                            │
+                         ▼                                           │
+                  ┌─────────────────────────────────────────┐        │
+                  │      🛡️  İNCELEME & ONAY (Review)       │        │
+                  │         diff.sh  ➔  apply.sh            │◄───────┘
+                  └────────────────────┬────────────────────┘   Doğrula &
+                                       │ 4. Ana Dala Birleştir  Bağlam Sağla
+                                       ▼
+                  ┌─────────────────────────────────────────┐
+                  │      🎉  GÜVENLİ ANA ÇALIŞMA AĞACI      │
+                  └─────────────────────────────────────────┘
 ```
 
 ---
