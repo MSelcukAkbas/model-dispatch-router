@@ -1,5 +1,3 @@
-from pathlib import Path
-import pytest
 
 from agentmind.store import Database, Repository, resolve_db_path
 from agentmind.sync import _prune_snapshots, sync

@@ -26,12 +26,12 @@ from .store import Repository
 # From model-dispatch-router/SKILL.md and dispatch.sh's ROLE_MODEL / ROLE_EFFORT /
 # ROLE_MAX_BUDGET_USD arrays. Encoded, not invented.
 POLICY: dict[str, dict[str, object]] = {
-    "backend": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 1.50},
-    "design": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 2.50},
-    "sdk": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 2.00,
+    "backend": {"engine": "claude", "model": "sonnet-5", "effort": "high", "budget": 1.50},
+    "design": {"engine": "claude", "model": "sonnet-5", "effort": "high", "budget": 2.50},
+    "sdk": {"engine": "claude", "model": "sonnet-5", "effort": "high", "budget": 2.00,
             "note": "use no-worktree only for untracked or nested repositories"},
-    "general": {"engine": "claude", "model": "sonnet", "effort": "medium", "budget": 1.00},
-    "ops": {"engine": "claude", "model": "sonnet", "effort": "high", "budget": 2.00,
+    "general": {"engine": "claude", "model": "sonnet-5", "effort": "medium", "budget": 1.00},
+    "ops": {"engine": "claude", "model": "sonnet-5", "effort": "high", "budget": 2.00,
             "note": "only role with ssh-mcp; SSH command content is not filtered"},
     "research": {"engine": "agy", "model": "gemini", "effort": "low", "budget": 0.50,
                  "note": "read-only evidence gathering"},

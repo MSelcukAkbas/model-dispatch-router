@@ -1,6 +1,5 @@
 """Finding the store, and never creating one where it does not belong."""
 
-import json
 
 import pytest
 from typer.testing import CliRunner

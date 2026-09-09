@@ -18,7 +18,6 @@ explicitly — those are read, never overwritten by the derivation.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -30,13 +29,13 @@ from .store import Repository
 # dispatch.sh:160-168 ROLE_MODEL. Kept here so an imported row records which
 # model actually ran, which .meta alone does not say.
 ROLE_MODEL = {
-    "backend": "sonnet",
-    "design": "sonnet",
-    "sdk": "sonnet",
-    "general": "sonnet",
-    "ops": "sonnet",
+    "backend": "sonnet-5",
+    "design": "sonnet-5",
+    "sdk": "sonnet-5",
+    "general": "sonnet-5",
+    "ops": "sonnet-5",
     "research": "haiku",
-    "judge": "opus",
+    "judge": "opus-4.8",
 }
 
 

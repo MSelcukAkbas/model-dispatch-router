@@ -75,7 +75,7 @@ def test_import_loads_tasks_claims_and_events(tmp_path):
     by_id = {r["task_id"]: r for r in repo.list_tasks()}
     task = by_id["TASK-64"]
     assert task["role"] == "backend"
-    assert task["model"] == "sonnet"      # derived from ROLE_MODEL, not in .meta
+    assert task["model"] == "sonnet-5"      # derived from ROLE_MODEL, not in .meta
     assert task["account"] == "secondary"
     assert task["budget_usd"] == 1.5
     assert task["attempt"] == 2

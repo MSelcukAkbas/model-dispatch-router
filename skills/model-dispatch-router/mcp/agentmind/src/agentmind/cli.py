@@ -26,12 +26,11 @@ from .resolver import build_graph, claim_evidence_files, resolve_claims
 from .router import POLICY, memory_gaps, recommend
 from .snapshot import take_snapshot
 from .sync import sync as run_sync
-from .workspace import locate_store, register, registered_workspaces
+from .workspace import locate_store, register
 from .store import (
     DEFAULT_DB_RELPATH,
     Database,
     Repository,
-    find_store,
     nearby_stores,
     resolve_db_path,
 )
@@ -553,7 +552,6 @@ def why(
         db.close()
         return
 
-    fresh = evaluate(src, rows[0]["commit_sha"], [file]).label if src else ""
     console.print()
     console.print(f"[bold]{file}[/bold]  [dim]— {len(rows)} claim(s)[/dim]")
     console.print()
@@ -1034,6 +1032,14 @@ def status(root: Path = typer.Option(None, "--root", help="Workspace root (defau
 
     console.print()
     console.print("[bold]AgentMind[/bold]  [dim]" + str(db.path) + "[/dim]")
+    # `uv tool install` registers by package name globally, not per-project —
+    # two checked-out copies of this package (e.g. an upstream dev repo and a
+    # per-project vendored copy) fight over the same `am`/`agentmind-mcp`
+    # binary, and the loser's session silently runs the WRONG repo's code
+    # (or, if that repo later moves, ModuleNotFoundError). __file__ is ground
+    # truth for which copy is actually live, no uv-internals guessing needed
+    # — check this first whenever `am` behaves like it doesn't belong here.
+    console.print("[dim]running from: " + str(Path(__file__).resolve().parent) + "[/dim]")
     console.print()
 
     left = Table.grid(padding=(0, 2))
