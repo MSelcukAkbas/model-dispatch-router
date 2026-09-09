@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agentmind-hook start",
+            "timeout": 60,
+            "statusMessage": "Loading repository memory"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agentmind-hook end",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

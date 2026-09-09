@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "agentmind": {
+      "command": "agentmind-mcp"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "agentmind-model-dispatch-router",
+  "version": "0.2.0",
+  "description": "Reviewable model dispatch with AgentMind code-linked memory and verification gates for Google Antigravity (AGY).",
+  "author": "AgentMind",
+  "skills": [
+    "skills/model-dispatch-router"
+  ],
+  "mcpServers": "./mcp_config.json",
+  "hooks": "./hooks.json"
+}

@@ -1,0 +1,12 @@
+{
+  "SessionStart": [
+    {
+      "command": "am hooks-run session-start"
+    }
+  ],
+  "SessionEnd": [
+    {
+      "command": "am hooks-run session-end"
+    }
+  ]
+}

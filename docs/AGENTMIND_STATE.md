@@ -53,15 +53,7 @@ separate delivery step and are intentionally not implied by the runtime code.
 
 Two things a reader may mistake for unfinished work are settled decisions.
 
-**No open-source licence.** `LICENSE` states all rights reserved. The project
-is kept as an internal tool; replacing that file with MIT or Apache-2.0 is the
-only step required to open it later.
+**Open-source licence.** The project is released under the MIT License (`LICENSE`).
 
-**No git remote.** `.github/workflows/ci.yml` is written and waits for a push.
-Until then the same two checks run locally: `uv run pytest -q` inside the
-package, and `bash scripts/smoke-test.sh` from the repository root. Both were
-also executed against a Linux container so that the platform the workflow
-names is proven rather than assumed; the invocation is recorded in the smoke
-test's header.
+**Git remote and CI.** The repository is hosted at `https://github.com/MSelcukAkbas/model-dispatch-router`. Continuous integration runs via `.github/workflows/ci.yml`. Local checks can be run via `uv run pytest -q` inside `skills/model-dispatch-router/mcp/agentmind` and `bash skills/model-dispatch-router/scripts/smoke-test.sh`.
 
-Neither decision is load-bearing for the code, and both are reversible.

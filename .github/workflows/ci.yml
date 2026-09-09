@@ -29,6 +29,23 @@ jobs:
       - name: Run the unit suite
         run: uv run pytest -q
 
+  node-tests:
+    name: node scripts & plugins (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify plugin build
+        run: npm run build
+      - name: Run Node.js tests
+        run: npm run test:node
+
   onboarding:
     name: fresh-install smoke test (${{ matrix.os }})
     # The unit suite runs inside an environment that is already correct. This

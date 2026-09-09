@@ -25,7 +25,7 @@ build/
 .ruff_cache/
 
 # --- Generated / disposable -------------------------------------------------
-plugins/
+# (plugins/ directory is tracked in Git for ready-to-use distributions)
 
 # --- Editor & machine-local state ------------------------------------------
 .vscode/
@@ -34,3 +34,5 @@ CLAUDE.md
 .claude/settings.json
 .codex/hooks.json
 .agents/
+old_model-dispatch/
+.gitignore

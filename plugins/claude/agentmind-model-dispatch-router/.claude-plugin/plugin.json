@@ -1,0 +1,11 @@
+{
+  "name": "agentmind-model-dispatch-router",
+  "version": "0.2.0",
+  "description": "Reviewable model dispatch with AgentMind code-linked memory and verification gates for Claude Code.",
+  "author": {
+    "name": "AgentMind"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
+}

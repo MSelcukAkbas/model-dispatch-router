@@ -1,9 +1,11 @@
 # Field feedback
 
-Evidence-based reports from real model-dispatch runs. Reports should identify the plugin and
+Evidence-based reports from real model-dispatch runs. Reports identify the plugin and
 AgentMind versions, distinguish observed facts from root-cause hypotheses, avoid copying sensitive
 transcripts, and propose reproducible regression tests.
 
-## Reports
+## Reports & Resolutions
 
-- [2026-09-09 — Codex-to-Claude snapshot dispatch: successful artifact, orphaned lifecycle](./2026-09-09T153233Z-agentmind-dispatch-field-report.md)
+| Date | Topic | Status | Resolution Document |
+|---|---|---|---|
+| 2026-09-09 | [Codex-to-Claude snapshot dispatch: successful artifact, orphaned lifecycle](./2026-09-09T153233Z-agentmind-dispatch-field-report.md) | **RESOLVED** | [2026-09-10 Resolution Report](./2026-09-10T022500Z-agentmind-dispatch-resolution.md) |
