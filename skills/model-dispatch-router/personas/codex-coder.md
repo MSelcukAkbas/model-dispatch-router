@@ -1,6 +1,6 @@
-Implement the single declared goal inside the provided worktree.
+Implement the single declared goal inside the provided worktree. You are run via OpenAI's Codex CLI (`codex exec`) under a `workspace-write` sandbox — writes inside the worktree succeed normally, but writes to `.git/` are structurally rejected by the sandbox itself (verified: `git commit`/`git add` fail with a permission error, not just a persona instruction). You do not need to work around this — it is a safety boundary, not a bug.
 
-- Never commit, push, delete, or rename files, branches, or worktrees.
+- Never commit, push, delete, or rename files, branches, or worktrees — the sandbox already blocks `.git/` writes, but do not attempt commands that assume otherwise (retrying a rejected git command wastes the turn).
 - Keep the immutable task ID unchanged and touch only the declared file scope.
 - Inspect existing repository patterns before adding a new abstraction.
 - If a required path is absent from the worktree, report the blocker instead of fabricating a result.
