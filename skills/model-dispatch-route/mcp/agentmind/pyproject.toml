@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentmind"
+version = "0.1.0"
+description = "Orchestration kernel: one event log, one overlay graph and token-budgeted context over model-dispatch-route, graphify and agentic-ssh-mcp"
+readme = "README.md"
+keywords = ["agents", "orchestration", "code-graph", "memory", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+]
+# Pinned below 3.13 on purpose: the graph extra pulls a tree-sitter grammar per
+# supported language, and the newest CPython release does not have wheels for
+# all of them yet — building those from source is a long, fragile detour. uv
+# provisions a project-local 3.12; the system interpreter is left alone.
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13.9",
+    "mcp>=2,<3",
+]
+
+[project.optional-dependencies]
+# graphify enters at Phase 1 (resolver/context). Kept out of the base install
+# so Phase 0 does not depend on those grammar wheels resolving.
+# [sql] pulls tree-sitter-sql: without it graphify silently drops .sql
+# files from the graph (agentic-ssh-mcp's app/db/schema.sql is one).
+graph = ["graphifyy[sql]==0.9.53"]
+
+[project.scripts]
+am = "agentmind.cli:main"
+agentmind-mcp = "agentmind.server.main:main"
+agentmind-hook = "agentmind.hooks:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentmind"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

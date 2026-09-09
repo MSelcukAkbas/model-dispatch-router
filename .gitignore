@@ -1,24 +1,11 @@
 # --- SECRETS ---------------------------------------------------------------
-# Imported reference trees may contain machine-local credentials. Never track
-# them; ignoring a credential does not make it safe, so rotate any exposed key.
-references/miras.claude/
-references/miras.remember/
-
-# --- Reference clones (each carries its own .git) ---------------------------
-# Consumed as dependencies/read-only references, not as source of this repo.
-references/graphify/
-references/agentic-ssh-mcp/
-references/.agent/
-
-# Local model-dispatch account registry can contain plaintext credentials.
-skills/model-dispatch/scripts/accounts.sh
+skills/model-dispatch-route/scripts/accounts.sh
 
 # --- Runtime state ----------------------------------------------------------
 .agentmind/
 .agent-logs/
 .worktrees/
-.model-dispatch.json
-# graphify writes its AST cache and graph.json here whenever extraction runs
+.model-dispatch-route.json
 graphify-out/
 .data/
 .remember/
@@ -37,11 +24,13 @@ build/
 .pytest_cache/
 .ruff_cache/
 
-# --- Editor-local state ----------------------------------------------------
+# --- Generated / disposable -------------------------------------------------
+plugins/
+
+# --- Editor & machine-local state ------------------------------------------
 .vscode/
-# Hook installs are machine-local: `am hooks-install` writes these, and they
-# name a command (agentmind-hook) that only exists once this package is
-# installed. Committing them hands every clone a SessionStart hook pointing at
-# a binary that clone does not have.
+CLAUDE.md
+# Hook installs are machine-local: `am hooks-install` writes these.
 .claude/settings.json
 .codex/hooks.json
+.agents/

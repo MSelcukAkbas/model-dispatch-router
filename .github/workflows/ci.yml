@@ -18,7 +18,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
-        working-directory: skills/model-dispatch/mcp/agentmind
+        working-directory: skills/model-dispatch-route/mcp/agentmind
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

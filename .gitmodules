@@ -1,0 +1,3 @@
+[submodule "references/agentic-ssh-mcp"]
+	path = references/agentic-ssh-mcp
+	url = https://github.com/MSelcukAkbas/agentic-ssh-mcp

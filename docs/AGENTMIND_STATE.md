@@ -1,6 +1,6 @@
 # AgentMind architecture
 
-AgentMind is the repository-memory layer beneath the `model-dispatch` skill.
+AgentMind is the repository-memory layer beneath the `model-dispatch-route` skill.
 It keeps model output traceable to code, supplies bounded context to later
 sessions, and refuses to treat an agent statement as verified evidence without
 a local gate.
@@ -9,7 +9,7 @@ a local gate.
 
 | Component | Responsibility |
 | --- | --- |
-| `skills/model-dispatch/SKILL.md` | Orchestrator workflow and safety boundaries |
+| `skills/model-dispatch-route/SKILL.md` | Orchestrator workflow and safety boundaries |
 | `scripts/dispatch.sh` | Isolated model process and worktree lifecycle |
 | `mcp/bridge` | Live orchestrator-to-agent questions and results |
 | `mcp/agentmind` | SQLite event log, code-linked claims, context, hooks, and gate |
