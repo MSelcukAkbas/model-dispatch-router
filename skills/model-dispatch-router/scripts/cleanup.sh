@@ -6,7 +6,10 @@
 # git operation. Never call this from inside a dispatched agent's own run.
 set -euo pipefail
 TASK="$1"
-[[ "$TASK" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$ ]] || { echo "error: invalid task identifier" >&2; exit 1; }
+SCRIPT_DIR_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=dispatch-common.sh
+source "$SCRIPT_DIR_EARLY/dispatch-common.sh"
+dispatch_common_valid_task_id "$TASK" || { echo "error: invalid task identifier" >&2; exit 1; }
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORKTREE_DIR="$REPO_ROOT/.worktrees/$TASK"
 BRANCH="agent/$TASK"

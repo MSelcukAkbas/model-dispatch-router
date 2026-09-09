@@ -135,6 +135,7 @@ done
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/scope.sh"
+source "$SCRIPT_DIR/dispatch-common.sh"
 # Extra accounts are local-only; without --account, use the invoking user's
 # current Claude session. account-registry.sh never ships private registries.
 source "$SCRIPT_DIR/account-registry.sh"
@@ -178,13 +179,13 @@ DISALLOWED="Bash(git commit*),Bash(git push*),Bash(rm -rf*),Bash(rm -r -f*),Bash
 #   judge                decision-only, no exploration expected — pay for the
 #                        best reasoning since it's a single short call
 declare -A ROLE_MODEL=(
-  [backend]="sonnet"
-  [design]="sonnet"
-  [sdk]="sonnet"
-  [general]="sonnet"
-  [ops]="sonnet"
+  [backend]="sonnet-5"
+  [design]="sonnet-5"
+  [sdk]="sonnet-5"
+  [general]="sonnet-5"
+  [ops]="sonnet-5"
   [research]="haiku"
-  [judge]="opus"
+  [judge]="opus-4.8"
 )
 # Roles restricted to structurally-cannot-write tools (no Edit/Write/Bash at
 # all — stronger than the commit/push/delete denylist used for the writer
@@ -219,7 +220,7 @@ declare -A ROLE_BRIDGE=(
 # them even with the MCP server configured and connected.
 BRIDGE_TOOL_NAMES="mcp__agent-bridge__ask_orchestrator,mcp__agent-bridge__submit_result,mcp__agent-bridge__list_pending_questions,mcp__agent-bridge__answer_question,mcp__agent-bridge__get_result,mcp__agent-bridge__knowledge_write,mcp__agent-bridge__knowledge_search"
 AGENTMIND_TOOL_NAMES="mcp__agentmind__memory_status_tool,mcp__agentmind__memory_context,mcp__agentmind__memory_for_file"
-MODEL="${ROLE_MODEL[$ROLE]:-sonnet}"
+MODEL="${ROLE_MODEL[$ROLE]:-sonnet-5}"
 
 # Role -> default reasoning effort. research is cheap-scan-only (Haiku, no
 # deep reasoning needed); general is docs/config busywork; everything else
@@ -286,45 +287,11 @@ else
 fi
 
 # --- GOAL header (required) + FILES header (optional) ---
-GOAL_LINE="$(grep -m1 '^# GOAL:' "$PROMPT_FILE" || true)"
-if [ -z "$GOAL_LINE" ]; then
-  echo "error: prompt file must start with a '# GOAL: <one sentence>' header — exactly one objective, no ambiguity for the agent to resolve on its own." >&2
-  exit 1
-fi
+GOAL_LINE="$(dispatch_common_require_goal "$PROMPT_FILE" "no ambiguity for the agent to resolve on its own")" || exit 1
 
 FILES_LINE="$(grep -m1 '^# FILES:' "$PROMPT_FILE" || true)"
 if [ -n "$FILES_LINE" ]; then
-  THIS_FILES="${FILES_LINE#"# FILES:"}"
-  SCOPE_TMP="$(mktemp)"
-  IFS=',' read -ra REQUESTED_SCOPE <<< "$THIS_FILES"
-  for raw_path in "${REQUESTED_SCOPE[@]}"; do
-    raw_path="$(printf '%s' "$raw_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    normalized_path="$(scope_normalize_entry "$raw_path")" || { echo "error: invalid # FILES scope entry '$raw_path'" >&2; rm -f "$SCOPE_TMP"; exit 1; }
-    echo "$normalized_path" >> "$SCOPE_TMP"
-  done
-  sort -u "$SCOPE_TMP" > "$LOG_DIR/$TASK.scope"
-  rm -f "$SCOPE_TMP"
-  scope_reserve "$LOG_DIR" "$TASK" "$SCRIPT_DIR" || exit $?
-  for other in "$LOG_DIR"/*.files; do
-    [ -e "$other" ] || continue
-    OTHER_TASK="$(basename "$other" .files)"
-    [ "$OTHER_TASK" = "$TASK" ] && continue
-    node "$SCRIPT_DIR/lifecycle.js" status "$LOG_DIR" "$OTHER_TASK" >/dev/null 2>&1
-    [ "$?" = 10 ] || continue
-    OTHER_FILES="$(cat "$other")"
-    IFS=',' read -ra MINE <<< "$THIS_FILES"
-    IFS=',' read -ra THEIRS <<< "$OTHER_FILES"
-    for f in "${MINE[@]}"; do
-      normalized_mine="$(scope_normalize_entry "$f")" || continue
-      for other_scope in "${THEIRS[@]}"; do
-        if scope_entries_overlap "$normalized_mine" "$other_scope"; then
-          echo "refused: scope '$normalized_mine' overlaps with still-active task '$OTHER_TASK' scope '$other_scope'." >&2
-          exit 12
-        fi
-      done
-    done
-  done
-  echo "$(paste -sd, "$LOG_DIR/$TASK.scope")" > "$LOG_DIR/$TASK.files"
+  dispatch_common_build_scope "$LOG_DIR" "$TASK" "$SCRIPT_DIR" "${FILES_LINE#"# FILES:"}" || exit $?
 elif [ "${ROLE_READONLY[$ROLE]:-false}" != "true" ]; then
   echo "error: writer roles require a non-empty '# FILES:' header; it is enforced by diff.sh/apply.sh." >&2
   exit 1
@@ -394,9 +361,6 @@ elif [ "$NO_WORKTREE" = "1" ]; then
   if [ "${ROLE_READONLY[$ROLE]:-false}" != "true" ] && [ ! -f "$LOG_DIR/$TASK.no-worktree-baseline" ]; then
     scope_snapshot "$REPO_ROOT" "$LOG_DIR/$TASK.scope" > "$LOG_DIR/$TASK.no-worktree-baseline"
   fi
-elif [ -d "$WORKTREE_DIR" ]; then
-  echo "note: worktree $WORKTREE_DIR already exists — reusing." >&2
-  RUN_DIR="$WORKTREE_DIR"
 else
   # Exit code checked explicitly (2026-07-30 fix — H3): with only
   # `set -uo pipefail` (no `-e`), a failed `git worktree add` (e.g. branch
@@ -407,10 +371,7 @@ else
   # handing a supposedly-isolated bypassPermissions run full write access to
   # the real working tree instead. Refuse instead of silently downgrading
   # isolation.
-  if ! git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE_DIR" HEAD; then
-    echo "error: git worktree add failed for '$TASK' (branch '$BRANCH' may already exist — check 'git branch -a' / 'git worktree list', likely a prior run's leftover; cleanup.sh removes both). Refusing to silently fall back to the main checkout for a role that expects isolation." >&2
-    exit 1
-  fi
+  dispatch_common_ensure_worktree "$REPO_ROOT" "$WORKTREE_DIR" "$BRANCH" || exit 1
   RUN_DIR="$WORKTREE_DIR"
 fi
 
@@ -694,7 +655,6 @@ fi
 # The bootstrap uses the run UUID plus process-start identity. Do not re-check
 # with kill -0 here: a recycled PID would turn an unrelated process into a
 # permanent false "running" task.
-TS_STALE="$(date +%s)"
 # bridge.json/stophook-count/result-missing added (2026-07-30 fix — H2):
 # these are the agent-bridge state files a PRIOR run of this same task-id
 # left behind (get_result/submit_result state, Stop-hook block counter, the
@@ -706,9 +666,7 @@ TS_STALE="$(date +%s)"
 # run would mean the new run's Stop hook never actually enforces
 # submit_result again. Archive them alongside json/err/exitcode/pid so a
 # same-task-id redispatch starts with a clean bridge slate.
-for ext in json err exitcode pid bridge.json stophook-count result-missing run.json final-status.json checkpoint.json; do
-  [ -f "$LOG_DIR/$TASK.$ext" ] && mv "$LOG_DIR/$TASK.$ext" "$LOG_DIR/$TASK.$ext.prev-$TS_STALE"
-done
+dispatch_common_archive_stale "$LOG_DIR" "$TASK" json err exitcode pid bridge.json stophook-count result-missing run.json final-status.json checkpoint.json
 
 (
   node "$SCRIPT_DIR/lifecycle.js" begin "$LOG_DIR" "$TASK" claude "$BASHPID" "${ROLE_BRIDGE[$ROLE]:-false}" || exit 1

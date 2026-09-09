@@ -1,12 +1,26 @@
 #!/bin/bash
-# Usage: diff.sh <task-slug>; exit 11 missing worktree, 13 invalid scope.
+# Usage: diff.sh <task-slug> [--allow-extra path1,path2]; exit 11 missing
+# worktree, 13 invalid scope. Out-of-scope changes are always shown (in a
+# separate section, never merged into the in-scope patch) so the orchestrator
+# can review them without --allow-extra; that flag only affects whether
+# apply.sh may later write them.
 set -uo pipefail
-TASK="${1:?Usage: diff.sh TASK}"
-[[ "$TASK" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "Invalid task identifier" >&2; exit 1; }
+TASK="${1:?Usage: diff.sh TASK [--allow-extra path1,path2]}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=dispatch-common.sh
+source "$SCRIPT_DIR/dispatch-common.sh"
+dispatch_common_valid_task_id "$TASK" || { echo "Invalid task identifier" >&2; exit 1; }
+shift
+EXTRA=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --allow-extra) EXTRA="${2:?error: --allow-extra needs a comma-separated path list}"; shift 2 ;;
+    *) echo "error: unknown argument '$1'" >&2; exit 1 ;;
+  esac
+done
 REPO_ROOT="$(git rev-parse --show-toplevel)" || exit 1
 WORKTREE_DIR="$REPO_ROOT/.worktrees/$TASK"
 LOG_DIR="$REPO_ROOT/.agent-logs"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/scope.sh"
 if [ ! -d "$WORKTREE_DIR" ]; then
   if [ -f "$LOG_DIR/$TASK.meta" ] && grep -q '^no_worktree=1' "$LOG_DIR/$TASK.meta"; then
@@ -31,5 +45,4 @@ if [ -f "$LOG_DIR/$TASK.meta" ] && grep -q '^snapshot=1$' "$LOG_DIR/$TASK.meta" 
   echo "refused: snapshot baseline is missing" >&2
   exit 16
 fi
-node "$SCRIPT_DIR/snapshot.js" diff "$REPO_ROOT" "$WORKTREE_DIR" "$LOG_DIR/$TASK.scope" "$LOG_DIR/$TASK.snapshot.json" || exit $?
-echo "Scope manifest accepted every changed path."
+node "$SCRIPT_DIR/snapshot.js" diff "$REPO_ROOT" "$WORKTREE_DIR" "$LOG_DIR/$TASK.scope" "$LOG_DIR/$TASK.snapshot.json" "$EXTRA" || exit $?

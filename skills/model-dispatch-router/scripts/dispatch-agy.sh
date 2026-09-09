@@ -58,10 +58,14 @@
 #     agent-bridge.js's per-task state relies on a DISPATCH_TASK_ID env var
 #     agy has no equivalent hook for. Instead: agy returns plain text (its
 #     `response` field, structured per the STATUS/CHANGED/RISK/VERIFIED/
-#     FINDINGS shape in `personas/agy-coder.md`); the ORCHESTRATOR reads
-#     $TASK.agy.json, applies via apply.sh, and calls knowledge_write itself
-#     for anything durable. Do not add agy to the bridge's mcp registration
-#     without re-reading this comment.
+#     FINDINGS shape in `personas/agy-coder.md` — research/judge use their
+#     own matching shapes). `ingest-findings.js`, called below right
+#     after the engine exits, parses that FINDINGS: block and calls
+#     knowledge-store.js's insertKnowledge() directly — no MCP roundtrip
+#     needed since this always runs locally in the same checkout (2026-09-09
+#     fix: every agy dispatch previously showed 0 claims in `am coverage`
+#     because nothing ever did this). Do not add agy to the bridge's mcp
+#     registration without re-reading this comment.
 #   - --new-project is MANDATORY, not a flag callers can skip (verified live
 #     2026-08-27): without it, agy can silently answer from an unrelated
 #     STALE prior project's files instead of the current directory's actual
@@ -129,38 +133,48 @@ if [ ! -f "$PROMPT_FILE" ]; then
   exit 1
 fi
 
-GOAL_LINE="$(grep -m1 '^# GOAL:' "$PROMPT_FILE" || true)"
-if [ -z "$GOAL_LINE" ]; then
-  echo "error: prompt file must start with a '# GOAL: <one sentence>' header — exactly one objective, this engine gets one shot, no back-and-forth." >&2
-  exit 1
-fi
+source "$SCRIPT_DIR/scope.sh"
+source "$SCRIPT_DIR/dispatch-common.sh"
+GOAL_LINE="$(dispatch_common_require_goal "$PROMPT_FILE" "this engine gets one shot, no back-and-forth")" || exit 1
 
 # Tiered model defaults per role — research is cheap/fast scanning (mirrors
 # Claude's haiku pick), judge is Google's strongest reasoning tier (the whole
 # point of this lane is an independent-vendor cross-check for judge, not
 # just re-running Claude through a different CLI).
+#
+# Full live `agy models` catalog as of 2026-09-08 (re-check periodically —
+# this drifts, that's how research went from 3.7 to 3.8 between two sessions
+# in this same repo): gemini-3.8-flash-{high,medium,low},
+# gemini-3.7-flash-{high,medium,low}, gemini-3.6-flash-{high,medium,low},
+# gemini-3.1-pro-{high,low} (no -medium), claude-sonnet-5,
+# claude-opus-4.8 (claude-opus-4-6-thinking), gpt-oss-120b-medium. The last three exist as
+# --model overrides on this account's agy quota, but that quota is reported
+# very small relative to the Gemini tiers — treat them as an emergency
+# fallback when Gemini is exhausted, not a routine choice, and never for
+# `judge` without a good reason: judge's whole point is an independent
+# Google-vendor cross-check on the SAME finding a Claude session is
+# reviewing, so pointing it at claude-* defeats that purpose for this one
+# call (dispatching to Claude directly via dispatch.sh is simpler and
+# cheaper than doing it through agy's Claude passthrough anyway).
 declare -A ROLE_MODEL=(
-  [research]="gemini-3.7-flash-medium"
+  [research]="gemini-3.8-flash-medium"
   [judge]="gemini-3.1-pro-high"
   [coder]="gemini-3.1-pro-high"
 )
 MODEL="${MODEL_OVERRIDE:-${ROLE_MODEL[$ROLE]}}"
+if [ "$ROLE" = "judge" ] && [ -n "$MODEL_OVERRIDE" ] && [[ "$MODEL_OVERRIDE" != gemini-* ]]; then
+  echo "warning: judge is being pointed at '$MODEL_OVERRIDE', not a gemini-* model — this defeats judge's independent-vendor cross-check purpose if the orchestrator asking for this verdict is itself Claude. Proceeding anyway (not blocked); this is a deliberate choice, not the routine path." >&2
+fi
 
 mkdir -p "$LOG_DIR" "$REPO_ROOT/.worktrees"
 
-source "$SCRIPT_DIR/scope.sh"
 if [ "$ROLE" = coder ]; then
   FILES_LINE="$(grep -m1 '^# FILES:' "$PROMPT_FILE" || true)"
   [ -n "$FILES_LINE" ] || { echo 'error: coder requires # FILES:' >&2; exit 13; }
-  SCOPE_TMP="$(mktemp)"
-  IFS=',' read -ra ENTRIES <<< "${FILES_LINE#'# FILES:'}"
-  for ENTRY in "${ENTRIES[@]}"; do
-    ENTRY="$(printf '%s' "$ENTRY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    scope_normalize_entry "$ENTRY" >> "$SCOPE_TMP" || { rm -f "$SCOPE_TMP"; exit 13; }
-  done
-  [ -s "$SCOPE_TMP" ] || { rm -f "$SCOPE_TMP"; exit 13; }
-  mv "$SCOPE_TMP" "$LOG_DIR/$TASK.scope"
-  scope_reserve "$LOG_DIR" "$TASK" "$SCRIPT_DIR" || exit $?
+  # dispatch_common_build_scope returns 12 (scope_reserve collision, keep as
+  # documented) or 1 (invalid/empty manifest, mapped to this script's
+  # existing exit 13 for that case).
+  dispatch_common_build_scope "$LOG_DIR" "$TASK" "$SCRIPT_DIR" "${FILES_LINE#'# FILES:'}" || { CODE=$?; [ "$CODE" = 12 ] && exit 12; exit 13; }
 else
   # Explicit command-free protocol; does not pretend to be a tool sandbox.
   # Omitted permission bypass stays fail-closed for headless denied operations.
@@ -175,12 +189,7 @@ fi
 WORKTREE_DIR="$REPO_ROOT/.worktrees/$TASK"
 BRANCH="agent/$TASK"
 if [ "$ROLE" = "coder" ]; then
-  if [ -d "$WORKTREE_DIR" ]; then
-    echo "note: worktree $WORKTREE_DIR already exists — reusing." >&2
-  elif ! git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE_DIR" HEAD; then
-    echo "error: git worktree add failed for '$TASK' (branch '$BRANCH' may already exist — check 'git branch -a' / 'git worktree list', possibly a prior dispatch.sh or dispatch-agy.sh run on the same task-id; cleanup.sh removes both). Refusing to fall back to the main checkout for a writer role that expects isolation." >&2
-    exit 11
-  fi
+  dispatch_common_ensure_worktree "$REPO_ROOT" "$WORKTREE_DIR" "$BRANCH" || exit 11
   RUN_DIR="$WORKTREE_DIR"
 else
   RUN_DIR="$REPO_ROOT"
@@ -228,10 +237,7 @@ else
   echo "dispatching (agy): task=$TASK role=$ROLE model=$MODEL timeout=${TIMEOUT_MIN}m" >&2
 fi
 
-TS_STALE="$(date +%s)"
-for ext in agy.json agy.err agy.exitcode agy.pid run.json final-status.json checkpoint.json; do
-  [ ! -f "$LOG_DIR/$TASK.$ext" ] || mv "$LOG_DIR/$TASK.$ext" "$LOG_DIR/$TASK.$ext.prev-$TS_STALE"
-done
+dispatch_common_archive_stale "$LOG_DIR" "$TASK" agy.json agy.err agy.exitcode agy.pid run.json final-status.json checkpoint.json
 node "$SCRIPT_DIR/lifecycle.js" begin "$LOG_DIR" "$TASK" agy "$BASHPID" false || exit 1
 (
   cd "$RUN_DIR" || { echo "error: cd to RUN_DIR ($RUN_DIR) failed" >&2; exit 1; }
@@ -249,14 +255,24 @@ node "$SCRIPT_DIR/lifecycle.js" finalize "$LOG_DIR" "$TASK" "$EXIT_CODE"
 EXIT_CODE=$?
 node "$SCRIPT_DIR/lifecycle.js" hook "$LOG_DIR" "$TASK" 0
 
+# Structural fix for the "agy findings never reach the knowledge store" gap
+# (this lane has no per-invocation MCP — see the header comment above): parse
+# whatever FINDINGS: block the response contains and write it directly
+# against knowledge-store.js, same as Claude's submit_result path does. Runs
+# on any classified outcome with a captured response (done/partial/blocked),
+# not just success — a partial research pass can still have found something
+# worth keeping. Fail-open: a knowledge-store problem is logged, never turns
+# an otherwise-fine dispatch into a failure.
+node "$SCRIPT_DIR/ingest-findings.js" "$LOG_DIR" "$TASK" agy 2>&1 | sed 's/^/knowledge: /' >&2 || true
+
 if [ "$EXIT_CODE" -ne 0 ]; then
   echo "error: agy exited $EXIT_CODE for task '$TASK' — see $LOG_DIR/$TASK.agy.err" >&2
   exit "$EXIT_CODE"
 fi
 
 if [ "$ROLE" = "coder" ]; then
-  echo "done: task=$TASK — response in $LOG_DIR/$TASK.agy.json (parse .response field, expect STATUS/CHANGED/RISK/VERIFIED/FINDINGS per personas/agy-coder.md). Worktree at $WORKTREE_DIR, branch $BRANCH — review with 'diff.sh $TASK', apply with 'apply.sh $TASK' (same as a dispatch.sh writer task), then cleanup.sh $TASK when done. Call knowledge_write yourself for any durable FINDINGS — this lane has no bridge MCP wired." >&2
+  echo "done: task=$TASK — response in $LOG_DIR/$TASK.agy.json (parse .response field, expect STATUS/CHANGED/RISK/VERIFIED/FINDINGS per personas/agy-coder.md). Worktree at $WORKTREE_DIR, branch $BRANCH — review with 'diff.sh $TASK', apply with 'apply.sh $TASK' (same as a dispatch.sh writer task), then cleanup.sh $TASK when done. FINDINGS were auto-ingested into the knowledge store above; call knowledge_write yourself only for something that came up outside that block." >&2
 else
-  echo "done: task=$TASK — response in $LOG_DIR/$TASK.agy.json (parse .response field). Read it and call knowledge_write yourself if anything durable came up — this lane has no bridge MCP wired." >&2
+  echo "done: task=$TASK — response in $LOG_DIR/$TASK.agy.json (parse .response field). FINDINGS were auto-ingested into the knowledge store above; call knowledge_write yourself only for something that came up outside that block." >&2
 fi
 exit 0

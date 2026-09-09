@@ -20,6 +20,17 @@ function entries(manifest) {
   return lines;
 }
 function allowed(file, scope) { return scope.some(p => file === p || (p.endsWith('/') && file.startsWith(p))); }
+// --allow-extra: an orchestrator-supplied, explicitly-typed widening of scope
+// for ONE diff/apply invocation — never something the dispatched agent can
+// set itself (it has no access to this CLI). Same validation as a manifest
+// line so a typo can't smuggle in '..' or an absolute path.
+function parseExtra(csv) {
+  if (!csv) return [];
+  return csv.split(',').map(entry => entry.trim()).filter(Boolean).map(entry => {
+    if (entry.includes('\\') || entry.startsWith('/') || /^[A-Za-z]:/.test(entry) || entry.split('/').some(p => p === '.' || p === '..' || p === '.git') || entry.includes('//')) fail(`Invalid --allow-extra entry: ${entry}`);
+    return entry;
+  });
+}
 function safeFile(repo, file) {
   if (!file || path.isAbsolute(file) || file.split('/').some(p => p === '..' || p.toLowerCase() === '.git')) fail(`Unsafe path: ${file}`);
   let cursor = repo;
@@ -98,19 +109,26 @@ function prepare(repo, worktree, manifest, baselineFile) {
   fs.renameSync(temporary, baselineFile);
   return tree;
 }
-function patch(repo, worktree, manifest, baselineFile) {
+function patch(repo, worktree, manifest, baselineFile, extra = []) {
   const scope = entries(manifest);
   const baseline = baselineFile && fs.existsSync(baselineFile) ? JSON.parse(fs.readFileSync(baselineFile, 'utf8')).tree : git(worktree, ['rev-parse', 'HEAD']).toString().trim();
   const current = capture(worktree, baseline);
   const changed = git(worktree, ['diff', '--no-renames', '--name-only', '-z', baseline, current]).toString().split('\0').filter(Boolean);
+  const inScope = [];
+  const outOfScope = [];
   for (const file of changed) {
-    if (!allowed(file, scope)) fail(`scope_violation: ${file}`);
-    safeFile(worktree, file); safeFile(repo, file);
+    if (allowed(file, scope) || allowed(file, extra)) { safeFile(worktree, file); safeFile(repo, file); inScope.push(file); }
+    else outOfScope.push(file);
   }
-  return { baseline, current, changed, data: git(worktree, ['diff', '--binary', '--full-index', '--no-renames', baseline, current]) };
+  // Out-of-scope files are reported, never silently included in the patch
+  // data — a plain `diff` call surfaces them for review without needing
+  // --allow-extra; only apply() below treats a nonempty outOfScope as fatal.
+  const data = inScope.length ? git(worktree, ['diff', '--binary', '--full-index', '--no-renames', baseline, current, '--', ...inScope]) : Buffer.alloc(0);
+  return { baseline, current, changed: inScope, outOfScope, data };
 }
-function apply(repo, worktree, manifest, baselineFile) {
-  const result = patch(repo, worktree, manifest, baselineFile);
+function apply(repo, worktree, manifest, baselineFile, extra = []) {
+  const result = patch(repo, worktree, manifest, baselineFile, extra);
+  if (result.outOfScope.length) fail(`scope_violation: ${result.outOfScope.join(', ')} — outside the task manifest. Re-run diff.sh/apply.sh with --allow-extra to explicitly include these paths, or update # FILES: and re-dispatch.`);
   const original = treeEntries(repo, result.baseline);
   for (const file of result.changed) {
     const target = safeFile(repo, file);
@@ -129,11 +147,18 @@ function apply(repo, worktree, manifest, baselineFile) {
 }
 module.exports = { prepare, patch, apply };
 if (require.main === module) {
-  const [command, repo, worktree, manifest, baselineFile] = process.argv.slice(2);
+  const [command, repo, worktree, manifest, baselineFile, extraCsv] = process.argv.slice(2);
   try {
     if (command === 'prepare') console.log(prepare(repo, worktree, manifest, baselineFile));
-    else if (command === 'diff') process.stdout.write(patch(repo, worktree, manifest, baselineFile).data);
-    else if (command === 'apply') console.log(`Applied ${apply(repo, worktree, manifest, baselineFile).length} paths without staging.`);
-    else fail('Usage: snapshot.js prepare|diff|apply REPO WORKTREE MANIFEST BASELINE', 1);
+    else if (command === 'diff') {
+      const result = patch(repo, worktree, manifest, baselineFile, parseExtra(extraCsv));
+      process.stdout.write(result.data);
+      if (result.outOfScope.length) {
+        console.error('\n== OUT OF SCOPE (not shown above; not applied without --allow-extra) ==');
+        for (const file of result.outOfScope) console.error(file);
+      }
+    }
+    else if (command === 'apply') console.log(`Applied ${apply(repo, worktree, manifest, baselineFile, parseExtra(extraCsv)).length} paths without staging.`);
+    else fail('Usage: snapshot.js prepare|diff|apply REPO WORKTREE MANIFEST BASELINE [EXTRA_SCOPE_CSV]', 1);
   } catch (error) { console.error(error.message); process.exit(typeof error.code === 'number' ? error.code : 16); }
 }

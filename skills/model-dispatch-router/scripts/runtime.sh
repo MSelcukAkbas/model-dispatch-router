@@ -1,8 +1,10 @@
 #!/bin/bash
 # Bootstrap before touching task artifacts. Runtime bundles survive plugin updates.
+# shellcheck source=dispatch-common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dispatch-common.sh"
 dispatch_bootstrap() {
   local entry="$1" task="$2"; shift 2
-  [[ "$task" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$ ]] || { echo 'error: invalid task ID' >&2; exit 1; }
+  dispatch_common_valid_task_id "$task" || { echo 'error: invalid task ID' >&2; exit 1; }
   [ "${DISPATCH_PINNED_TASK:-}" = "$task" ] && return 0
   local root logs source_dir runtime rc
   root="$(git rev-parse --show-toplevel)" || exit 1

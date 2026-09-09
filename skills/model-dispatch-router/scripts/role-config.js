@@ -6,13 +6,13 @@ const path = require('path');
 
 const [role, repoRoot, skillRoot] = process.argv.slice(2);
 const defaults = {
-  backend:  { model: 'sonnet', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 1.50 },
-  design:   { model: 'sonnet', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 2.00 },
-  sdk:      { model: 'sonnet', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 2.00 },
-  general:  { model: 'sonnet', effort: 'medium', readonly: false, bridge: true, maxBudgetUsd: 1.00 },
-  ops:      { model: 'sonnet', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 2.00 },
-  research: { model: 'haiku',  effort: 'low',    readonly: true,  bridge: true, maxBudgetUsd: 0.50 },
-  judge:    { model: 'opus',   effort: 'high',   readonly: true,  bridge: true, maxBudgetUsd: 1.50 },
+  backend:  { model: 'sonnet-5', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 1.50 },
+  design:   { model: 'sonnet-5', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 2.00 },
+  sdk:      { model: 'sonnet-5', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 2.00 },
+  general:  { model: 'sonnet-5', effort: 'medium', readonly: false, bridge: true, maxBudgetUsd: 1.00 },
+  ops:      { model: 'sonnet-5', effort: 'high',   readonly: false, bridge: true, maxBudgetUsd: 2.00 },
+  research: { model: 'haiku',    effort: 'low',    readonly: true,  bridge: true, maxBudgetUsd: 0.50 },
+  judge:    { model: 'opus-4.8', effort: 'high',   readonly: true,  bridge: true, maxBudgetUsd: 1.50 },
 };
 
 function fail(message) {

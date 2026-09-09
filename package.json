@@ -1,0 +1,20 @@
+{
+  "name": "agentmind-model-dispatch-router",
+  "version": "0.2.0",
+  "description": "Model Dispatch Router with AgentMind shared memory and multi-platform plugins",
+  "scripts": {
+    "build": "node plugins/build.mjs",
+    "install:local": "node plugins/install.mjs",
+    "sync": "node plugins/install.mjs --sync",
+    "test:node": "node --test skills/model-dispatch-router/scripts/test/*.test.js"
+  },
+  "keywords": [
+    "multi-agent",
+    "dispatch",
+    "codex",
+    "claude",
+    "antigravity",
+    "agentmind"
+  ],
+  "license": "MIT"
+}

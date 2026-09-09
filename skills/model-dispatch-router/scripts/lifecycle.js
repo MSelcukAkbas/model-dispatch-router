@@ -45,7 +45,28 @@ function processIdentity(pid) {
     return start ? { kind: 'win32', pid: Number(pid), native_pid: nativePid, start } : null;
   } catch { return null; }
 }
+// codex's `--json` is JSONL like Claude's stream-json, but its event shape is
+// its own (thread.started/turn.started/item.completed/turn.failed — verified
+// live 2026-09-09 against codex-cli 0.152.1, both success and error paths),
+// so it gets its own branch rather than forcing it through Claude's
+// type:"result"/type:"assistant" shape. dispatch-codex.sh also asks codex for
+// `-o/--output-last-message FILE` (written to `.codex.txt`) — the engine's
+// own authoritative final text — preferred over reconstructing it from the
+// JSONL when both are present.
+function codexOutput(dir, task) {
+  const raw = read(file(dir, task, 'codex.json'));
+  const events = raw.split('\n').map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(e => e && typeof e === 'object');
+  const threadEvent = events.find(e => e.type === 'thread.started');
+  const thread_id = (typeof threadEvent?.thread_id === 'string' && threadEvent.thread_id.trim()) ? threadEvent.thread_id.trim() : null;
+  const terminal = events.findLast(e => e.type === 'turn.failed' || e.type === 'error') || null;
+  const agentMessages = events.filter(e => e.type === 'item.completed' && e.item?.type === 'agent_message' && typeof e.item.text === 'string' && e.item.text.trim());
+  const lastMessageFile = read(file(dir, task, 'codex.txt')).trim();
+  const text = lastMessageFile || agentMessages.at(-1)?.item.text || '';
+  const checkpoint = agentMessages.map(e => e.item.text).join('\n');
+  return { terminal, text, checkpoint, thread_id, event_count: events.length };
+}
 function output(dir, task, engine) {
+  if (engine === 'codex') return codexOutput(dir, task);
   const raw = read(file(dir, task, engine === 'agy' ? 'agy.json' : 'json'));
   let events = [];
   try { events = [JSON.parse(raw)]; } catch {
@@ -59,7 +80,9 @@ function output(dir, task, engine) {
   return { terminal, text: typeof text === 'string' ? text.trim() : '', checkpoint, event_count: events.length };
 }
 function engineFor(dir, task, run) {
-  return run?.engine || (fs.existsSync(file(dir, task, 'agy.exitcode')) || fs.existsSync(file(dir, task, 'agy.meta')) ? 'agy' : 'claude');
+  if (run?.engine) return run.engine;
+  if (fs.existsSync(file(dir, task, 'codex.exitcode')) || fs.existsSync(file(dir, task, 'codex.meta'))) return 'codex';
+  return fs.existsSync(file(dir, task, 'agy.exitcode')) || fs.existsSync(file(dir, task, 'agy.meta')) ? 'agy' : 'claude';
 }
 function classify(dir, task, rawExit, run) {
   const engine = engineFor(dir, task, run);
@@ -70,7 +93,17 @@ function classify(dir, task, rawExit, run) {
   if (terminal?.subtype === 'error_max_budget_usd' || (Array.isArray(terminal?.errors) && terminal.errors.some(e => /max(imum)?\s*budget|budget.*exceed/i.test(String(e))))) return result('budget_capped', 20, 'Per-task budget exhausted');
   if (terminal?.api_error_status === 429 || (terminal?.terminal_reason === 'api_error' && /session limit|usage limit|rate.?limit/i.test(String(terminal?.result)))) return result('quota_exhausted', 17, 'Provider quota exhausted');
   if (rawExit !== 0) {
-    if (/usage limit|rate_limit_error|exceeded your.*(usage|quota)|\b429\b/i.test(read(file(dir, task, engine === 'agy' ? 'agy.err' : 'err')))) return result('quota_exhausted', 17, 'Provider quota error');
+    // codex reports its own errors as a JSONL event (type:"error" or
+    // type:"turn.failed"), not on stderr — verified live 2026-09-09
+    // (codex-cli 0.152.1) via a deliberately-invalid --model call: stderr
+    // held only generic noise, the actual 400 was in the JSONL. Its
+    // rate-limit/quota TEXT shape is not independently verified the same
+    // way (would require actually exhausting quota) — this regex reuses the
+    // same pattern the other two engines already match on, on a best-effort
+    // basis, and falls through to a generic `failed` if it doesn't match.
+    const errText = engine === 'codex' ? String(terminal?.error?.message || terminal?.message || '') : read(file(dir, task, engine === 'agy' ? 'agy.err' : 'err'));
+    if (/usage limit|rate_limit_error|exceeded your.*(usage|quota)|\b429\b/i.test(errText)) return result('quota_exhausted', 17, 'Provider quota error');
+    if (engine === 'codex' && errText) return result('failed', 1, `Engine reported an error: ${errText.slice(0, 200)}`);
     return result('failed', 1, 'Engine returned nonzero exit');
   }
   if (terminal?.is_error === true || (typeof terminal?.subtype === 'string' && terminal.subtype.startsWith('error'))) return result('failed', 1, 'Terminal event reports an error');
@@ -81,7 +114,7 @@ function classify(dir, task, rawExit, run) {
   return result('done', 0, 'Engine completed and result validated');
 }
 function begin(dir, task, engine, pid, bridgeRequired = false) {
-  if (!['claude', 'agy'].includes(engine)) throw new Error('Unsupported engine');
+  if (!['claude', 'agy', 'codex'].includes(engine)) throw new Error('Unsupported engine');
   fs.mkdirSync(dir, { recursive: true });
   const run = { schema_version: 1, run_id: crypto.randomUUID(), task, engine, pid: Number(pid), process_identity: processIdentity(pid), bridge_required: bridgeRequired, started_at: new Date().toISOString() };
   atomic(file(dir, task, 'run.json'), run);
@@ -91,9 +124,24 @@ function finalize(dir, task, rawExit) {
   if (!Number.isInteger(rawExit) || rawExit < 0) throw new Error('Invalid engine exit code');
   const run = json(file(dir, task, 'run.json'));
   const result = { schema_version: 1, task, run_id: run?.run_id || null, ...classify(dir, task, rawExit, run), completed_at: new Date().toISOString(), hook: { status: 'pending' } };
+  const out = output(dir, task, result.engine);
+  if (result.engine === 'codex' && out.thread_id) {
+    result.thread_id = out.thread_id;
+    const metaPath = file(dir, task, 'codex.meta');
+    try {
+      if (fs.existsSync(metaPath)) {
+        let metaContent = read(metaPath);
+        if (/^thread_id=/m.test(metaContent)) {
+          metaContent = metaContent.replace(/^thread_id=.*$/m, `thread_id=${out.thread_id}`);
+        } else {
+          metaContent = `${metaContent.trimEnd()}\nthread_id=${out.thread_id}\n`;
+        }
+        fs.writeFileSync(metaPath, metaContent);
+      }
+    } catch { /* fail-soft */ }
+  }
   // Publish before optional session-end hooks and compatibility exit markers.
   atomic(file(dir, task, 'final-status.json'), result);
-  const out = output(dir, task, result.engine);
   if (result.exit_code !== 0) atomic(file(dir, task, 'checkpoint.json'), { run_id: result.run_id, status: result.status, summary: out.checkpoint || out.text || 'No assistant text captured before interruption.', event_count: out.event_count, captured_at: new Date().toISOString() });
   return result;
 }
@@ -107,7 +155,9 @@ function status(dir, task) {
     if (final.hook?.status === 'failed' && final.exit_code === 0) return { ...final, engine_status: final.status, status: 'hook_failed', exit_code: 24, reason: 'Engine result retained; session-end hook failed' };
     return final;
   }
-  const engine = engineFor(dir, task, run), exitPath = file(dir, task, engine === 'agy' ? 'agy.exitcode' : 'exitcode');
+  const engine = engineFor(dir, task, run);
+  const exitSuffix = engine === 'agy' ? 'agy.exitcode' : engine === 'codex' ? 'codex.exitcode' : 'exitcode';
+  const exitPath = file(dir, task, exitSuffix);
   if (fs.existsSync(exitPath)) {
     const raw = read(exitPath).trim();
     if (!/^\d+$/.test(raw)) return { status: 'failed', exit_code: 1, reason: 'Invalid exit marker' };
@@ -118,7 +168,7 @@ function status(dir, task) {
     if (current && run.process_identity && JSON.stringify(current) === JSON.stringify(run.process_identity)) return { status: 'running', exit_code: 10, pid: run.pid };
     return { status: 'orphaned', exit_code: 23, reason: 'Runner identity missing, gone, or changed; inspect captured output' };
   }
-  if (fs.existsSync(file(dir, task, 'pid')) || fs.existsSync(file(dir, task, 'agy.pid'))) return { status: 'orphaned', exit_code: 23, reason: 'Legacy PID cannot establish process ownership; inspect task manually' };
+  if (fs.existsSync(file(dir, task, 'pid')) || fs.existsSync(file(dir, task, 'agy.pid')) || fs.existsSync(file(dir, task, 'codex.pid'))) return { status: 'orphaned', exit_code: 23, reason: 'Legacy PID cannot establish process ownership; inspect task manually' };
   return { status: 'not_found', exit_code: 11, reason: 'No dispatch record' };
 }
 function hook(dir, task, hookExit) {

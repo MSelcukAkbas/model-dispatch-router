@@ -17,6 +17,15 @@
 # worktree/prompt) only if the task predates the session-id feature (no
 # session_id line in $TASK.meta).
 #
+# A task that finished successfully (status 0) can ALSO be resumed, but only
+# together with --amend-prompt: this is the "orchestrator reviewed the diff
+# and rejected it" path (contradicts the report, missing a required file,
+# fails an obvious check) that used to force discarding the whole worktree
+# and starting a brand-new task-id for what was often a one-file fix — see
+# SKILL.md's dispatch workflow notes. Same worktree, same session, the
+# amendment is handed to the model as new instructions on top of what it
+# already did; the original prompt file itself is never edited.
+#
 # On a budget-capped(20)/no-progress resume, dispatch.sh's own budget-clamp
 # logic takes over automatically — it will NOT just hand back the same
 # dollar amount that already ran out; it checks whether the worktree diff
@@ -42,9 +51,10 @@
 # collect.sh read the NEW run, not stale state from the cut-off one.
 #
 # Exit codes: 0 re-dispatched | 1 bad usage/missing meta | 11 task not found |
-#             18 task is not in a resumable state (still running, or never
-#                failed) | 19 dispatch.sh refused — no-progress budget clamp
-#                exhausted, needs a human, not another auto-resume
+#             18 task is not in a resumable state (still running; or done
+#                without --amend-prompt) | 19 dispatch.sh refused —
+#                no-progress budget clamp exhausted, needs a human, not
+#                another auto-resume
 set -uo pipefail
 
 if [ "$#" -lt 1 ]; then
@@ -52,8 +62,10 @@ if [ "$#" -lt 1 ]; then
   exit 1
 fi
 TASK="$1"
-[[ "$TASK" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$ ]] || exit 1
 BOOTSTRAP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=dispatch-common.sh
+source "$BOOTSTRAP_DIR/dispatch-common.sh"
+dispatch_common_valid_task_id "$TASK" || exit 1
 source "$BOOTSTRAP_DIR/runtime.sh"
 dispatch_bootstrap resume.sh "$TASK" "$@"
 shift
@@ -75,36 +87,53 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="$REPO_ROOT/.agent-logs"
 
-if [ ! -f "$LOG_DIR/$TASK.meta" ] || [ ! -f "$LOG_DIR/$TASK.prompt.orig" ]; then
+IS_CODEX=0
+META_FILE=""
+if [ -f "$LOG_DIR/$TASK.codex.meta" ]; then
+  IS_CODEX=1
+  META_FILE="$LOG_DIR/$TASK.codex.meta"
+elif [ -f "$LOG_DIR/$TASK.meta" ]; then
+  META_FILE="$LOG_DIR/$TASK.meta"
+  [ "$(grep '^engine=' "$META_FILE" | cut -d= -f2 || true)" = "codex" ] && IS_CODEX=1
+fi
+
+if [ -z "$META_FILE" ] || [ ! -f "$LOG_DIR/$TASK.prompt.orig" ]; then
   echo "not_found: no resumable record for task '$TASK' (missing .meta or .prompt.orig — was it dispatched before the resume feature existed, or never dispatched?)" >&2
   exit 11
 fi
 
 # Reuse status.sh's own classification instead of re-implementing it —
-# refuse to resume a task that's still running or that finished cleanly.
+# refuse to resume a task that's still running.
 STATUS_OUT="$(bash "$SCRIPT_DIR/status.sh" "$TASK" 2>&1)"
 STATUS_CODE=$?
-if [ "$STATUS_CODE" != "17" ] && [ "$STATUS_CODE" != "14" ] && [ "$STATUS_CODE" != "20" ] && [ "$STATUS_CODE" != "21" ] && [ "$STATUS_CODE" != "22" ]; then
-  echo "refused: task '$TASK' is not in a resumable state (status.sh exit $STATUS_CODE: $STATUS_OUT). Only quota-exhausted(17), budget-capped(20), or timeout(14) tasks can be resumed." >&2
+# A cleanly finished task (0) is normally not resumable — resuming a
+# successful run with no new instructions would just re-run it for nothing.
+# But "done" only means the engine delivered SOMETHING; the orchestrator may
+# still reject the deliverable (e.g. diff.sh's out-of-scope section shows a
+# missing test, or the report contradicts the diff — see the AGY/Claude
+# review-and-reject cases this exists for). --amend-prompt is required in
+# that case specifically because it is the one signal that this is a
+# deliberate correction round, not an accidental double-resume of a task
+# that already succeeded.
+if [ "$STATUS_CODE" = "0" ] && [ -z "$AMEND_PROMPT" ]; then
+  echo "refused: task '$TASK' already finished successfully (status.sh exit 0). Pass --amend-prompt FILE if the orchestrator is rejecting the deliverable and wants a correction round in the SAME worktree/session instead of a fresh task-id." >&2
+  exit 18
+fi
+if [ "$STATUS_CODE" != "0" ] && [ "$STATUS_CODE" != "17" ] && [ "$STATUS_CODE" != "14" ] && [ "$STATUS_CODE" != "20" ] && [ "$STATUS_CODE" != "21" ] && [ "$STATUS_CODE" != "22" ]; then
+  echo "refused: task '$TASK' is not in a resumable state (status.sh exit $STATUS_CODE: $STATUS_OUT). Only done(0, with --amend-prompt), quota-exhausted(17), budget-capped(20), or timeout(14) tasks can be resumed." >&2
   exit 18
 fi
 
 # shellcheck disable=SC1090
-ROLE="$(grep '^role=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
-META_TIMEOUT="$(grep '^timeout_min=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
-META_EFFORT="$(grep '^effort=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
-META_SESSION_ID="$(grep '^session_id=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
-# Missing on tasks dispatched before the no-worktree feature existed —
-# default "0" (normal worktree behavior) via the ${VAR:-default} form, which
-# also covers the empty-string case grep-no-match leaves behind.
-META_NO_WORKTREE="$(grep '^no_worktree=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
-META_SNAPSHOT="$(grep '^snapshot=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
-# Missing on tasks dispatched before the multi-account feature existed —
-# both default to "" via grep-no-match, same fallback shape as
-# META_NO_WORKTREE above: an old task resumes under ambient env, unchanged
-# from its pre-feature behavior.
-META_ACCOUNT="$(grep '^account=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
-META_CONFIG_DIR="$(grep '^config_dir=' "$LOG_DIR/$TASK.meta" | cut -d= -f2)"
+ROLE="$(grep '^role=' "$META_FILE" | cut -d= -f2)"
+META_TIMEOUT="$(grep '^timeout_min=' "$META_FILE" | cut -d= -f2)"
+META_EFFORT="$(grep '^effort=' "$META_FILE" | cut -d= -f2)"
+META_MODEL="$(grep '^model=' "$META_FILE" | cut -d= -f2 || true)"
+META_SESSION_ID="$(grep -e '^session_id=' -e '^thread_id=' "$META_FILE" | head -n1 | cut -d= -f2 || true)"
+META_NO_WORKTREE="$(grep '^no_worktree=' "$META_FILE" | cut -d= -f2 || true)"
+META_SNAPSHOT="$(grep '^snapshot=' "$META_FILE" | cut -d= -f2 || true)"
+META_ACCOUNT="$(grep '^account=' "$META_FILE" | cut -d= -f2 || true)"
+META_CONFIG_DIR="$(grep '^config_dir=' "$META_FILE" | cut -d= -f2 || true)"
 TIMEOUT_MIN="${TIMEOUT_OVERRIDE:-$META_TIMEOUT}"
 EFFORT="${EFFORT_OVERRIDE:-$META_EFFORT}"
 
@@ -119,20 +148,26 @@ if [ -n "$AMEND_PROMPT" ]; then
 fi
 
 TS="$(date +%s)"
-# bridge.json/stophook-count/result-missing archived too (2026-07-30 fix —
-# H2, same rationale as dispatch.sh's stale-artifact guard): resume.sh keeps
-# the SAME worktree/branch on purpose, but the agent-bridge state from the
-# cut-off attempt (pending questions, any partial submit_result, the
-# Stop-hook block counter) must not leak into the resumed run as if it were
-# current.
-for ext in json err exitcode pid bridge.json stophook-count result-missing agentmind-context.md agentmind-start.log agentmind-end.log; do
+for ext in json err exitcode pid codex.json codex.err codex.txt codex.exitcode codex.pid bridge.json stophook-count result-missing agentmind-context.md agentmind-start.log agentmind-end.log; do
   [ -f "$LOG_DIR/$TASK.$ext" ] && mv "$LOG_DIR/$TASK.$ext" "$LOG_DIR/$TASK.$ext.prev-$TS"
 done
 
-# Exported unconditionally (even when empty, which means "force ambient/
-# default", not "don't care") — dispatch.sh distinguishes "unset" from
-# "set to empty" via `${DISPATCH_CONFIG_DIR_OVERRIDE+set}`, see its own
-# "Account / config-dir resolution" block.
+if [ "$IS_CODEX" = "1" ]; then
+  if [ -n "$META_SESSION_ID" ]; then
+    echo "resuming (codex): task=$TASK role=$ROLE session=$META_SESSION_ID (continuing conversation; previous attempt's logs archived as *.prev-$TS)"
+    export DISPATCH_RESUME=1
+    export DISPATCH_SESSION_ID="$META_SESSION_ID"
+  else
+    echo "resuming (codex): task=$TASK role=$ROLE (no thread_id on record — starting fresh conversation on same worktree; previous logs archived as *.prev-$TS)" >&2
+  fi
+  DISPATCH_ARGS=(--timeout "$TIMEOUT_MIN" --effort "$EFFORT")
+  [ -n "$META_MODEL" ] && DISPATCH_ARGS+=(--model "$META_MODEL")
+  [ -n "$META_SESSION_ID" ] && DISPATCH_ARGS+=(--resume "$META_SESSION_ID")
+  [ -n "$AMEND_PROMPT" ] && DISPATCH_ARGS+=(--amend-prompt "$AMEND_COPY")
+  exec bash "$SCRIPT_DIR/dispatch-codex.sh" "$ROLE" "$TASK" "$LOG_DIR/$TASK.prompt.orig" "${DISPATCH_ARGS[@]}"
+fi
+
+# Exported unconditionally for Claude dispatches
 export DISPATCH_CONFIG_DIR_OVERRIDE="$META_CONFIG_DIR"
 
 if [ -n "$META_SESSION_ID" ]; then
