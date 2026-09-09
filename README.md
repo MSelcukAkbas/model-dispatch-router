@@ -29,70 +29,37 @@ Karmaşık yazılım projelerinde tek bir modelin her işi yapmaya çalışması
 Aşağıdaki şema, bir görevin ana orkestratörden çıkıp alt ajanlar tarafından işlenmesini ve güvenle ana depoya dahil edilmesini gösterir:
 
 ```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'background': '#0f172a',
-    'primaryColor': '#1e293b',
-    'primaryTextColor': '#f8fafc',
-    'primaryBorderColor': '#475569',
-    'lineColor': '#94a3b8',
-    'secondaryColor': '#1e293b',
-    'tertiaryColor': '#0f172a',
-    'clusterBkg': '#090d16',
-    'clusterBorder': '#334155'
-  }
-}}%%
-flowchart TD
-    subgraph HostGroup["🖥️ ANA ORKESTRATÖR (Host)"]
-        Host["Claude Code / Codex / Antigravity<br/><i>(Baş Mimar — Hedefi Belirler)</i>"]
+flowchart LR
+    Host["🖥️ <b>Host Orkestratör</b><br/>Claude Code · Codex · agy"]
+    Router["⚡ <b>Model Dispatch Route</b><br/>Bütçe, Kota & Worktree"]
+
+    subgraph Swarm ["🤖 <b>Uzman Ajan Havuzu</b>"]
+        direction TB
+        A1["🔨 Backend / SDK <i>(Sonnet)</i>"]
+        A2["🔍 Research / Scan <i>(Haiku)</i>"]
+        A3["⚖️ Judge / Architecture <i>(Opus)</i>"]
+        A4["🚀 Ops / SSH MCP <i>(Sonnet)</i>"]
     end
 
-    subgraph RouterGroup["⚡ MULTI-AGENT ROUTE & ISOLATION"]
-        Router["<b>dispatch.sh</b><br/><i>(Rol, Kota, Bütçe & Efor Yönlendirme)</i>"]
-        Worktree["<b>Git Worktree Sandbox</b><br/><i>(Her Göreve İzole Dal: .worktrees/T-XXXXXX)</i>"]
-    end
+    Review["🛡️ <b>İnceleme & Onay</b><br/>diff.sh ➔ apply.sh"]
+    Memory[("🧠 <b>AgentMind Memory</b><br/>Gate ➔ Graphify ➔ SQLite")]
 
-    subgraph AgentGroup["🤖 UZMAN AJAN PERSONA HAVUZU"]
-        A_Backend["🔨 <b>Backend / SDK</b><br/>Sonnet · Yüksek Efor<br/><i>Kod Üretimi & Test</i>"]
-        A_Design["🎨 <b>Design</b><br/>Sonnet · Yüksek Efor<br/><i>UI / Frontend / Stil</i>"]
-        A_Research["🔍 <b>Research</b><br/>Haiku / Flash · Düşük Efor<br/><i>Grep / Glob / Hızlı Tarama</i>"]
-        A_Judge["⚖️ <b>Judge</b><br/>Opus · Yüksek Efor<br/><i>Karar & Mimari Hakemlik</i>"]
-        A_Ops["🚀 <b>Ops</b><br/>Sonnet · SSH MCP<br/><i>Sunucu & Canlı Teşhis</i>"]
-    end
+    Host -->|"Görev Ver"| Router
+    Router -->|"İzole Çalıştır"| Swarm
+    Swarm -->|"Yama Üret"| Review
+    Review -->|"Birleştir"| Host
+    Review -.->|"Doğrula"| Memory
+    Memory -.->|"Bağlam Sağla"| Router
 
-    subgraph ReviewGroup["🛡️ ORKESTRATÖR ONAYI & ENTEGRASYON"]
-        DiffCheck["<b>diff.sh</b><br/><i>(Yamayı İncele)</i>"]
-        ApplyPatch["<b>apply.sh</b><br/><i>(Ana Çalışma Ağacına Uygula)</i>"]
-    end
+    classDef hostStyle fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef agentStyle fill:#1e293b,stroke:#64748b,stroke-width:1px,color:#f8fafc;
+    classDef reviewStyle fill:#0f172a,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
+    classDef memoryStyle fill:#0f172a,stroke:#10b981,stroke-width:2px,color:#f8fafc;
 
-    subgraph MemoryGroup["🧠 ORTAK BİLGİ DÜZLEMİ (AgentMind)"]
-        Gate["<b>Verification Gate</b><br/><i>(Test ve Doğrulama Kontrolü)</i>"]
-        Knowledge[("<b>Code Graph & Memory</b><br/><i>(SQLite + Graphify Overlay)</i>")]
-    end
-
-    Host -->|"1. Görevi Tanımla (Goal & Files)"| Router
-    Router -->|"2. Sandbox Oluştur"| Worktree
-    Worktree -->|"3. İşi Delege Et"| AgentGroup
-    AgentGroup -->|"4. Yamayı Üret"| DiffCheck
-    DiffCheck -->|"5. Onayla & Birleştir"| ApplyPatch
-    ApplyPatch -->|"6. Ana Ağaca Aktar"| Host
-
-    AgentGroup -.->|"Aday Bulguları İlet"| Gate
-    Gate -->|"Doğrulanan Bilgi"| Knowledge
-    Knowledge -.->|"Sonraki Göreve Bağlam Aktar"| Router
-
-    classDef hostStyle fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
-    classDef routerStyle fill:#1e293b,stroke:#818cf8,stroke-width:2px,color:#f8fafc;
-    classDef agentStyle fill:#182234,stroke:#64748b,stroke-width:1px,color:#f8fafc;
-    classDef reviewStyle fill:#1e293b,stroke:#f59e0b,stroke-width:2px,color:#f8fafc;
-    classDef memoryStyle fill:#1e293b,stroke:#10b981,stroke-width:2px,color:#f8fafc;
-
-    class Host hostStyle;
-    class Router,Worktree routerStyle;
-    class A_Backend,A_Design,A_Research,A_Judge,A_Ops agentStyle;
-    class DiffCheck,ApplyPatch reviewStyle;
-    class Gate,Knowledge memoryStyle;
+    class Host,Router hostStyle;
+    class A1,A2,A3,A4 agentStyle;
+    class Review reviewStyle;
+    class Memory memoryStyle;
 ```
 
 ---
