@@ -1,11 +1,11 @@
 # --- SECRETS ---------------------------------------------------------------
-skills/model-dispatch-route/scripts/accounts.sh
+skills/model-dispatch-router/scripts/accounts.sh
 
 # --- Runtime state ----------------------------------------------------------
 .agentmind/
 .agent-logs/
 .worktrees/
-.model-dispatch-route.json
+.model-dispatch-router.json
 graphify-out/
 .data/
 .remember/

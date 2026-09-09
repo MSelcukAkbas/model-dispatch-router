@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Python: 3.12](https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Multi--Agent: Swarm](https://img.shields.io/badge/Multi--Agent-Worktree%20Isolated-blueviolet.svg)](#-multi-agent-mimari-ve-roller)
-[![CI](https://github.com/MSelcukAkbas/model-dispatch-route/actions/workflows/ci.yml/badge.svg)](https://github.com/MSelcukAkbas/model-dispatch-route/actions)
+[![CI](https://github.com/MSelcukAkbas/model-dispatch-router/actions/workflows/ci.yml/badge.svg)](https://github.com/MSelcukAkbas/model-dispatch-router/actions)
 
 ---
 
@@ -73,7 +73,7 @@ Detaylı gereksinimler...
 ### 2. Ajanı Göreve Gönderin (`dispatch.sh`)
 ```bash
 # Backend ajanı izole bir worktree içinde işe başlar
-bash skills/model-dispatch-route/scripts/dispatch.sh backend TASK-101 prompt.md --timeout 20
+bash skills/model-dispatch-router/scripts/dispatch.sh backend TASK-101 prompt.md --timeout 20
 ```
 - `.worktrees/TASK-101` dizini otomatik oluşturulur.
 - İlgili modele özel persona yüklenir.
@@ -82,13 +82,13 @@ bash skills/model-dispatch-route/scripts/dispatch.sh backend TASK-101 prompt.md 
 ### 3. Değişiklikleri İnceleyin (`diff.sh`)
 Alt ajan işini bitirdiğinde ana deponuz bozulmaz. Üretilen yamayı orkestratör terminalinden inceleyin:
 ```bash
-bash skills/model-dispatch-route/scripts/diff.sh TASK-101
+bash skills/model-dispatch-router/scripts/diff.sh TASK-101
 ```
 
 ### 4. Güvenle Birleştirin (`apply.sh`) veya Reddedin
 ```bash
 # Değişiklikleri ana çalışma ağacına aktar ve worktree'yi temizle
-bash skills/model-dispatch-route/scripts/apply.sh TASK-101
+bash skills/model-dispatch-router/scripts/apply.sh TASK-101
 ```
 
 ---
@@ -115,13 +115,13 @@ Multi-agent sistemlerinde ajanların birbirinin yaptığı işlerden haberdar ol
 
 ```bash
 # 1. AgentMind CLI ve bellek çekirdeğini kurun
-uv tool install --editable "./skills/model-dispatch-route/mcp/agentmind[graph]" --force
+uv tool install --editable "./skills/model-dispatch-router/mcp/agentmind[graph]" --force
 
 # 2. Kullandığınız host platformlara (Claude Code, Codex, Antigravity) kancaları bağlayın
 am hooks-install . --platform all
 
 # 3. Model yapılandırmasını kopyalayın
-cp packaging/agentmind-model-dispatch-route/examples/model-dispatch-route.example.json .model-dispatch-route.json
+cp packaging/agentmind-model-dispatch-router/examples/model-dispatch-router.example.json .model-dispatch-router.json
 ```
 
 ---
@@ -139,15 +139,15 @@ cp packaging/agentmind-model-dispatch-route/examples/model-dispatch-route.exampl
 ## 📂 Dizin Ağacı
 
 ```
-model-dispatch-route/
-├── skills/model-dispatch-route/       # ⚡ Core Multi-Agent Motoru
+model-dispatch-router/
+├── skills/model-dispatch-router/       # ⚡ Core Multi-Agent Motoru
 │   ├── SKILL.md                      # Ajan koordinasyon yönergeleri
 │   ├── personas/                     # Ajan rolleri (backend, design, judge, ops, research)
 │   ├── scripts/                      # dispatch.sh, diff.sh, apply.sh, status.sh
 │   ├── mcp/agentmind/                # Paylaşımlı hafıza çekirdeği (SQLite, Graphify, Gate)
 │   └── mcp/bridge/                   # Canlı ajan iletişim köprüsü
 ├── packaging/                         # 📦 Dağıtım ve Eklenti Paketleme
-│   ├── agentmind-model-dispatch-route/ # Standart eklenti şablonu
+│   ├── agentmind-model-dispatch-router/ # Standart eklenti şablonu
 │   └── build.mjs                     # Dağıtım derleyicisi
 ├── references/                        # 🔗 Submodule Entegrasyonları
 │   └── agentic-ssh-mcp               # Ops rolü için SSH araç seti
@@ -162,10 +162,10 @@ model-dispatch-route/
 
 ```bash
 # Python çekirdeği birim testleri (103+ test)
-cd skills/model-dispatch-route/mcp/agentmind && uv run pytest -q
+cd skills/model-dispatch-router/mcp/agentmind && uv run pytest -q
 
 # Uçtan uca kurulum duman testi
-bash skills/model-dispatch-route/scripts/smoke-test.sh
+bash skills/model-dispatch-router/scripts/smoke-test.sh
 ```
 
 ---

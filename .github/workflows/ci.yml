@@ -18,7 +18,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
-        working-directory: skills/model-dispatch-route/mcp/agentmind
+        working-directory: skills/model-dispatch-router/mcp/agentmind
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -50,4 +50,4 @@ jobs:
           enable-cache: true
       - name: Run the smoke test
         shell: bash
-        run: bash skills/model-dispatch-route/scripts/smoke-test.sh
+        run: bash skills/model-dispatch-router/scripts/smoke-test.sh
