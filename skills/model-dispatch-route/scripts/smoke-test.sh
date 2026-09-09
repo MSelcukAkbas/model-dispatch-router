@@ -30,7 +30,7 @@
 set -euo pipefail
 
 APP="skills/model-dispatch-route/mcp/agentmind"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
 
 WORK="$(mktemp -d)"
@@ -117,6 +117,7 @@ git init -q "$HOOK_REPO"
 "$FULL/am" hooks-install "$HOOK_REPO" --platform all >/dev/null 2>&1 || true
 [ -f "$HOOK_REPO/.claude/settings.json" ] && ok "claude hook written" || fail "claude hook not written"
 [ -f "$HOOK_REPO/.codex/hooks.json" ] && ok "codex hook written" || fail "codex hook not written"
+[ -f "$HOOK_REPO/.agents/plugins/marketplace.json" ] && ok "agy marketplace written" || fail "agy marketplace not written"
 
 # The hook runs on every session start of every host that installs it, so a
 # non-zero exit or a crash there is felt immediately and everywhere.
@@ -131,7 +132,7 @@ echo "== repository hygiene =="
 # These are the output of `am hooks-install`, and they name a command that only
 # exists once this package is installed. Shipping them hands every clone a
 # session hook it cannot run.
-for tracked in .claude/settings.json .codex/hooks.json; do
+for tracked in .claude/settings.json .codex/hooks.json .agents/plugins/marketplace.json; do
   if git ls-files --error-unmatch "$tracked" >/dev/null 2>&1; then
     fail "$tracked is tracked; it is machine-local hook output"
   else
