@@ -1,27 +1,23 @@
 #!/bin/bash
-# Usage: quota-watch.sh [account] [poll_seconds]
-#   account       optional local registry name (default: current-session
-#                 CLAUDE_CONFIG_DIR, same resolution as usage.sh) -- normally
-#                 left empty: this watches the ORCHESTRATOR's current session
-#                 quota while it works, not a dispatch target's quota
-#                 (that's wait-quota.sh's job).
-#   poll_seconds  polling interval (default 300 = 5min -- this is a passive
-#                 current-session reminder, not a blocking gate, no need to poll fast)
+# quota-watch.sh — 3 platform (Claude Code, AGY, Codex) için sürekli kota izleme
 #
-# Does NOT block-until-threshold and does NOT exit on its own (unlike
-# wait-quota.sh) -- it just runs for the life of the session, printing a
-# line every time five_hour.utilization crosses a NEW 5-point band (up or
-# down) since the last poll. Silent polls (no band change) print nothing.
+# Kullanım:
+#   quota-watch.sh [ACCOUNT] [POLL_SECONDS]
+#     ACCOUNT      Claude hesabı (opsiyonel, accounts.sh kayıt defterinden)
+#     POLL_SECONDS Yoklama aralığı (varsayılan: 300 = 5 dakika)
 #
-# Start once near the top of a long/heavy session: Bash tool with
-# run_in_background:true, then watch it with the Monitor tool -- each
-# printed line becomes a notification, so the orchestrator gets nudged
-# "you're at 35% now... 40%... 45%..." without manually remembering to run
-# usage.sh every 15-20 minutes (see SKILL.md "Session Hygiene").
+# Çalışma şekli:
+#   - Arka planda başlatılır (run_in_background:true / IsDaemon:true).
+#   - Her 5 dakikada bir her platform için kota sorgular.
+#   - Yalnızca yüklü platformları izler; olmayan platformlar "yüklü değil" olarak bir kez bildirilir.
+#   - Her %5'lik bant geçişinde (yukarı ya da aşağı) bir satır yazar → Monitor tool ile bildirim alırsınız.
+#   - Hiçbir bant değişmediği yoklamalar sessiz geçer — Monitor spam yapmaz.
+#   - MAX_HOURS (varsayılan 8) sonra kendiliğinden durur (güvenlik kapağı).
+#   - Claude Code 5 saatlik kotası %90'ı aşarsa ayrıca uyarı verir.
 #
-# Safety cap: stops after MAX_HOURS (default 8) so a forgotten watcher from
-# a finished session doesn't run forever. Exit 0 on cap or usage.sh failure
-# -- either way, stop and let the caller decide whether to restart it.
+# Session başında başlatın:
+#   bash skills/model-dispatch-router/scripts/quota-watch.sh &
+#
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,35 +27,111 @@ POLL="${2:-300}"
 MAX_HOURS="${QUOTA_WATCH_MAX_HOURS:-8}"
 
 DEADLINE=$(( $(date +%s) + MAX_HOURS * 3600 ))
-LAST_BAND=-1
 
+# ── Bant takip değişkenleri (her platform için ayrı) ──────────────────────────
+LAST_BAND_CLAUDE=-1
+LAST_BAND_AGY_GEMINI=-1
+LAST_BAND_AGY_CLAUDE_GPT=-1
+NOTIFIED_CODEX=0
+
+# ── Yardımcı: Claude 5 saatlik kullanım yüzdesini al ─────────────────────────
+get_claude_util() {
+  local raw
+  raw="$(bash "$SCRIPT_DIR/usage.sh" --raw "$ACCOUNT" 2>&1)"
+  [ $? -ne 0 ] && echo "-1" && return
+  node -e "
+    try {
+      const j = JSON.parse(process.argv[1]);
+      process.stdout.write(String(j.five_hour.utilization));
+    } catch(e) { process.stdout.write('-1'); }
+  " -- "$raw" 2>/dev/null || echo "-1"
+}
+
+# ── Yardımcı: AGY kota satırlarını al (model_group\tutilization\tresets_at) ──
+get_agy_lines() {
+  # agy çıktısı: "Gemini Models\tFive Hour Limit Remaining\t44%\t2026-..."
+  agy -p "/usage" 2>/dev/null | while IFS=$'\t' read -r model_group limit_type remaining reset_at; do
+    [ -z "$model_group" ] && continue
+    if echo "$limit_type" | grep -qi "Five Hour"; then
+      local pct_used=$(( 100 - ${remaining//%/} ))
+      echo "${model_group}__5h\t${pct_used}\t${reset_at}"
+    fi
+  done
+}
+
+# ── Yardımcı: komut yüklü mü? ────────────────────────────────────────────────
+command_exists() { command -v "$1" &>/dev/null; }
+
+# ── İlk başlangıç mesajı ─────────────────────────────────────────────────────
+echo "quota-watch: başlatıldı — $(date '+%Y-%m-%d %H:%M:%S'), ${MAX_HOURS}h güvenlik kapağı, ${POLL}s aralık"
+
+# Yüklü olmayan platformları bir kez bildir
+command_exists agy    || echo "quota-watch: [AGY] yüklü değil — izlenmeyecek"
+command_exists codex  || echo "quota-watch: [Codex] yüklü değil — kota API'si de yok, izlenmeyecek"
+command_exists node   || echo "quota-watch: [Claude Code] node yüklü değil — izlenmeyecek"
+
+# ── Ana döngü ─────────────────────────────────────────────────────────────────
 while true; do
+  # Güvenlik kapağı kontrolü
   if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-    echo "quota-watch: ${MAX_HOURS}h safety cap reached, stopping (account=${ACCOUNT:-current-claude-session})."
+    echo "quota-watch: ${MAX_HOURS}h güvenlik kapağına ulaşıldı — duruluyor."
     exit 0
   fi
 
-  RAW="$(bash "$SCRIPT_DIR/usage.sh" --raw "$ACCOUNT" 2>&1)"
-  if [ $? -ne 0 ]; then
-    echo "quota-watch: usage.sh failed (account=${ACCOUNT:-current-claude-session}), stopping: $RAW" >&2
-    exit 0
+  NOW="$(date '+%H:%M:%S')"
+
+  # ── Claude Code ────────────────────────────────────────────────────────────
+  if command_exists node; then
+    UTIL="$(get_claude_util)"
+    if [ "$UTIL" = "-1" ]; then
+      echo "quota-watch [${NOW}]: [Claude Code] kota sorgulanamadı"
+    else
+      BAND=$(( ${UTIL%.*} / 5 * 5 ))
+      if [ "$BAND" != "$LAST_BAND_CLAUDE" ]; then
+        MSG="quota-watch [${NOW}]: [Claude Code] 5 saatlik → %${UTIL} kullanıldı"
+        # %90 uyarı eşiği
+        if awk -v u="$UTIL" 'BEGIN{exit (u >= 90) ? 0 : 1}'; then
+          MSG="$MSG ⚠ YÜKSEK KOTA — dispatch.sh yeni görev almayı reddeder, wait-quota.sh kullanın"
+        fi
+        echo "$MSG"
+        LAST_BAND_CLAUDE="$BAND"
+      fi
+    fi
   fi
 
-  PARSED="$(node -e "
-    const j = JSON.parse(process.argv[1]);
-    console.log(j.five_hour.utilization + ' ' + (j.five_hour.resets_at || 'n/a'));
-  " "$RAW" 2>&1)"
-  if [ $? -ne 0 ]; then
-    echo "quota-watch: usage.sh raw output unparseable (account=${ACCOUNT:-current-claude-session}), stopping: $PARSED" >&2
-    exit 0
+  # ── AGY ────────────────────────────────────────────────────────────────────
+  if command_exists agy; then
+    while IFS=$'\t' read -r key pct_used reset_at; do
+      [ -z "$key" ] && continue
+      BAND=$(( ${pct_used%.*} / 5 * 5 ))
+      # Hangi bant değişkeni? Gemini vs Claude&GPT
+      if echo "$key" | grep -qi "Gemini"; then
+        LAST_VAR="LAST_BAND_AGY_GEMINI"
+        CUR="${LAST_BAND_AGY_GEMINI}"
+        LABEL="Gemini (5h)"
+      else
+        LAST_VAR="LAST_BAND_AGY_CLAUDE_GPT"
+        CUR="${LAST_BAND_AGY_CLAUDE_GPT}"
+        LABEL="Claude&GPT (5h)"
+      fi
+      if [ "$BAND" != "$CUR" ]; then
+        echo "quota-watch [${NOW}]: [AGY] ${LABEL} → %${pct_used} kullanıldı — sıfırlanma: ${reset_at:-n/a}"
+        eval "${LAST_VAR}=${BAND}"
+      fi
+    done < <(get_agy_lines)
   fi
-  UTIL="${PARSED%% *}"
-  RESETS_AT="${PARSED#* }"
 
-  BAND=$(( ${UTIL%.*} / 5 * 5 ))
-  if [ "$BAND" != "$LAST_BAND" ]; then
-    echo "kota (account=${ACCOUNT:-current-claude-session}): %${UTIL} kullanildi, sifirlanma: ${RESETS_AT}"
-    LAST_BAND="$BAND"
+  # ── Codex ──────────────────────────────────────────────────────────────────
+  # Codex'in kota API'si yok; yalnızca ilk tur auth durumunu bildir
+  if command_exists codex && [ "$NOTIFIED_CODEX" = "0" ]; then
+    local_auth_ok=0
+    codex doctor 2>&1 | grep -qi "auth.*ok\|logged in\|authenticated\|ok" && local_auth_ok=1
+    if [ "$local_auth_ok" = "1" ]; then
+      echo "quota-watch [${NOW}]: [Codex] oturum açık — kota API'si yok, openai.com/account/usage adresini kontrol edin"
+    else
+      echo "quota-watch [${NOW}]: [Codex] oturum açılmamış — kota izlenemez"
+    fi
+    NOTIFIED_CODEX=1
   fi
 
   sleep "$POLL"

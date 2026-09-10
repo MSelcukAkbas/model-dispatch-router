@@ -133,6 +133,33 @@ Both directions are also available as plain commands (`am session-start`,
 
 ## Dispatch workflow
 
+## Session Hygiene — Oturum Başında Kota İzlemeyi Başlatın
+
+Her yeni orkestratör oturumu başladığında `quota-watch.sh`'i arka planda çalıştırın.
+Script; Claude Code, AGY ve Codex (yüklü olanlar) kotasını 5 dakikada bir otomatik
+olarak sorgular ve yalnızca her %5'lik bant geçişinde bir satır yazar — bu da
+Monitor aracına bildirim olarak düşer. Hiç bant değişmezse sessiz kalır, spam yapmaz.
+
+```sh
+# Oturum başında bir kez — 8 saatlik güvenlik kapağıyla kendiliğinden durur
+bash skills/model-dispatch-router/scripts/quota-watch.sh &
+```
+
+Anlık kota durumunu tek seferlik görmek için:
+
+```sh
+# Tüm platformlar (Claude Code + AGY + Codex):
+bash skills/model-dispatch-router/scripts/usage.sh
+
+# Yalnızca bir platform:
+bash skills/model-dispatch-router/scripts/usage.sh --platform agy
+bash skills/model-dispatch-router/scripts/usage.sh --platform claude
+bash skills/model-dispatch-router/scripts/usage.sh --platform codex
+```
+
+Claude Code kota eşiği (%90) aşılırsa `dispatch.sh` yeni görev almayı reddeder (çıkış 15).
+Bu durumda `wait-quota.sh` ile eşik altına düşmesini bekleyin ya da AGY / Codex kotasına geçin.
+
 ## Quick start and recovery
 
 Use `dispatch.sh` for Claude implementation and review roles. Use
@@ -277,9 +304,9 @@ or recover.
 | script | usage |
 |---|---|
 | `health.sh [ACCOUNT]` | preflight before dispatching — check this rather than discovering the problem mid-run |
-| `usage.sh [--raw] [ACCOUNT]` | current consumption for one account |
+| `usage.sh [--platform claude\|agy\|codex] [--raw] [ACCOUNT]` | **tüm platformlar** (Claude Code + AGY + Codex) için tek seferlik kota özeti; `--platform` ile tek platform seçilebilir; `--raw` Claude JSON'u döndürür (health.sh / wait-quota.sh uyumu) |
 | `wait-quota.sh [ACCOUNT] [MAX_PCT] [POLL_S]` | blocks until an account drops below a utilisation threshold |
-| `quota-watch.sh [ACCOUNT] [POLL_S]` | continuous monitoring |
+| `quota-watch.sh [ACCOUNT] [POLL_S]` | **3 platformu** (Claude Code + AGY + Codex) 5 dk aralıkla izler; her %5 bant geçişinde Monitor'a bildirim düşer — session başında arka planda başlatılması tavsiye edilir |
 | `context-usage.sh SESSION_ID [MAX_TOKENS] [ACCOUNT]` | how much context a specific session has consumed |
 
 ## Exit codes are the contract
