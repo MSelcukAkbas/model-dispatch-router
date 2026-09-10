@@ -124,13 +124,26 @@ NODEEOF
 
 # ── AGY kota sorgusu ──────────────────────────────────────────────────────────
 query_agy() {
-  # agy -p "/usage" → sekme-ayrılmış satırlar:
-  #   Gemini Models<TAB>Weekly Limit Remaining<TAB>56%<TAB>2026-09-10T20:01:26Z
+  # agy -p "/usage" → sekme-ayrılmış satırlar (4 kolon):
+  #   Gemini Models<TAB>Five Hour Limit Remaining<TAB>56%<TAB>2026-09-10T20:01:26Z
+  # Headless ortamda bazen hata/uyarı satırları karışır; bunları filtrele:
+  #   - 3. kolon \d+% formatında olmalı (örn: "56%")
+  #   - 4. kolon ISO 8601 tarih formatında olmalı (örn: "2026-...")
   local raw_out
   raw_out="$(agy -p "/usage" 2>&1)"
   local exit_code=$?
   if [ "$exit_code" -ne 0 ]; then
     echo "  [AGY]  HATA — kota sorgulanamadı (çıkış kodu $exit_code)"
+    return
+  fi
+
+  # Geçerli kota satırlarını çıkar (tab ile ayrılmış, 3. sütun: sayı%, 4. sütun: yıl ile başlayan)
+  local valid_lines
+  valid_lines="$(echo "$raw_out" | awk -F'\t' 'NF==4 && $3~/^[0-9]+%$/ && $4~/^20[0-9]{2}-/')"
+
+  if [ -z "$valid_lines" ]; then
+    echo "  [AGY]  HATA — kota verisi okunamadı (agy headless izin sorunu olabilir)"
+    echo "    ℹ Alternatif: interaktif terminalde 'agy -p \"/usage\"' komutunu çalıştırın"
     return
   fi
 
@@ -141,46 +154,47 @@ query_agy() {
     [ -z "$model_group" ] && continue
     # Kalan yüzdeyi "Remaining" ifadesini tersine çevirerek hesapla
     local pct_remaining="${remaining//%/}"
+    # Sayı değil ise atla
+    [[ "$pct_remaining" =~ ^[0-9]+$ ]] || continue
     local pct_used=$(( 100 - pct_remaining ))
-    local reset_label="n/a"
-    if [ -n "$reset_at" ]; then
-      # node ile ISO → timestamp dönüşümü
-      local reset_epoch
-      reset_epoch="$(node -e "process.stdout.write(String(Math.round(new Date('$reset_at').getTime()/1000)))" 2>/dev/null || echo 0)"
-      local mins_left=$(( (reset_epoch - now) / 60 ))
-      if [ "$mins_left" -gt 0 ]; then
-        reset_label="$reset_at (~${mins_left} dk)"
-      else
-        reset_label="$reset_at (geçti)"
-      fi
+    local reset_label="$reset_at"
+    # Kalan dakika hesapla
+    local reset_epoch
+    reset_epoch="$(node -e "process.stdout.write(String(Math.round(new Date('$reset_at').getTime()/1000)))" 2>/dev/null || echo 0)"
+    local mins_left=$(( (reset_epoch - now) / 60 ))
+    if [ "$mins_left" -gt 0 ]; then
+      reset_label="$reset_at (~${mins_left} dk)"
+    else
+      reset_label="$reset_at (geçti)"
     fi
     # Limit türünü kısalt
     local kind="$limit_type"
     if echo "$limit_type" | grep -qi "Five Hour"; then   kind="5 saatlik"; fi
     if echo "$limit_type" | grep -qi "Weekly";    then   kind="7 günlük "; fi
     echo "    $model_group — $kind : %${pct_used} kullanıldı (kalan: %${pct_remaining}) — sıfırlanma: ${reset_label}"
-  done <<< "$raw_out"
+  done <<< "$valid_lines"
 }
 
 # ── Codex kota sorgusu ────────────────────────────────────────────────────────
 query_codex() {
-  # Codex CLI'ının kota API'si yoktur. Sadece yüklü olup olmadığını ve
-  # oturum açılıp açılmadığını `codex doctor` ile tespit ediyoruz.
-  local doctor_out
-  doctor_out="$(codex doctor 2>&1)"
-  local exit_code=$?
-  if [ "$exit_code" -ne 0 ] && ! echo "$doctor_out" | grep -qi "ok\|pass\|auth"; then
-    echo "  [Codex]  HATA — codex doctor başarısız (oturum açılmamış olabilir)"
+  # codex-quota.sh: codex app-server JSON-RPC üzerinden gerçek kota verisini çeker
+  local codex_quota_script="$SCRIPT_DIR/codex-quota.sh"
+  if [ ! -f "$codex_quota_script" ]; then
+    echo "  [Codex]  HATA — codex-quota.sh bulunamadı ($codex_quota_script)"
     return
   fi
 
-  local auth_ok="✗ oturum açılmamış"
-  if echo "$doctor_out" | grep -qi "auth.*ok\|logged in\|authenticated\|ok"; then
-    auth_ok="✓ oturum açık"
-  fi
+  local out exit_code
+  out="$(bash "$codex_quota_script" 2>&1)"
+  exit_code=$?
 
-  echo "  [Codex]  $auth_ok"
-  echo "    ℹ Codex CLI'ının kota API'si bulunmamaktadır; openai.com/account/usage adresinden takip edin."
+  if [ "$exit_code" -eq 0 ]; then
+    echo "  [Codex]"
+    echo "$out"
+  else
+    echo "  [Codex]  HATA — kota sorgulanamadı (çıkış $exit_code): $out"
+    echo "    ℹ Alternatif: openai.com/account/usage adresini ziyaret edin"
+  fi
 }
 
 # ── Ana akış ─────────────────────────────────────────────────────────────────
