@@ -112,17 +112,26 @@ Multi-agent sistemlerinde ajanların birbirinin yaptığı işlerden haberdar ol
 ### Gereksinimler
 - Python `>=3.12, <3.13`
 - [uv](https://docs.astral.sh/uv/)
+- Node.js `>=18` (npm)
 - Git ve Bash / Zsh (Windows için Git Bash / WSL veya macOS/Linux)
 
 ```bash
-# 1. AgentMind CLI ve bellek çekirdeğini kurun
+# 1. Depoyu klonlayın ve dizine geçin
+git clone https://github.com/MSelcukAkbas/model-dispatch-router.git
+cd model-dispatch-router
+
+# 2. Bağımlılıkları kurun ve eklenti paketlerini derleyin
+npm install
+npm run build
+
+# 3. AgentMind CLI ve bellek çekirdeğini kurun
 uv tool install --editable "./skills/model-dispatch-router/mcp/agentmind[graph]" --force
 
-# 2. Kullandığınız host platformlara (Claude Code, Codex, Antigravity) kancaları bağlayın
+# 4. Kullandığınız host platformlara (Claude Code, Codex, Antigravity) kancaları bağlayın
 am hooks-install . --platform all
 
-# 3. Model yapılandırmasını kopyalayın
-cp packaging/agentmind-model-dispatch-router/examples/model-dispatch-router.example.json .model-dispatch-router.json
+# 5. Örnek model yapılandırmasını kopyalayın
+cp skills/model-dispatch-router/templates/model-dispatch-router.example.json .model-dispatch-router.json
 ```
 
 ---
@@ -141,19 +150,23 @@ cp packaging/agentmind-model-dispatch-router/examples/model-dispatch-router.exam
 
 ```
 model-dispatch-router/
-├── skills/model-dispatch-router/       # ⚡ Core Multi-Agent Motoru
+├── skills/model-dispatch-router/       # ⚡ Core Multi-Agent Motoru (Tek Kaynak / Source of Truth)
 │   ├── SKILL.md                      # Ajan koordinasyon yönergeleri
 │   ├── personas/                     # Ajan rolleri (backend, design, judge, ops, research)
-│   ├── scripts/                      # dispatch.sh, diff.sh, apply.sh, status.sh
+│   ├── scripts/                      # dispatch.sh, diff.sh, apply.sh, status.sh ve testler
 │   ├── mcp/agentmind/                # Paylaşımlı hafıza çekirdeği (SQLite, Graphify, Gate)
 │   └── mcp/bridge/                   # Canlı ajan iletişim köprüsü
-├── packaging/                         # 📦 Dağıtım ve Eklenti Paketleme
-│   ├── agentmind-model-dispatch-router/ # Standart eklenti şablonu
-│   └── build.mjs                     # Dağıtım derleyicisi
+├── plugins/                           # 📦 Eklenti Dağıtımları ve Araçları
+│   ├── claude/                       # Claude Code eklenti çıktısı
+│   ├── codex/                        # OpenAI Codex eklenti çıktısı
+│   ├── antigravity/                  # Antigravity eklenti çıktısı
+│   ├── platforms/                    # Platform adaptörleri
+│   ├── build.mjs                     # Eklenti derleyicisi
+│   └── install.mjs                   # Kurulum & senkronizasyon yöneticisi
 ├── references/                        # 🔗 Submodule Entegrasyonları
 │   └── agentic-ssh-mcp               # Ops rolü için SSH araç seti
-├── docs/                             # 📚 Durum & Mimari Notları
-├── .github/workflows/ci.yml           # 🧪 Çoklu Platform CI (Linux & Windows)
+├── docs/                             # 📚 Durum, Çözüm & Mimari Notları
+├── .github/workflows/ci.yml           # 🧪 Çoklu Platform CI (Linux & Windows - Node & Python)
 └── LICENSE                            # ⚖️ MIT Lisansı
 ```
 
@@ -162,10 +175,16 @@ model-dispatch-router/
 ## 🧪 Testler
 
 ```bash
-# Python çekirdeği birim testleri (103+ test)
-cd skills/model-dispatch-router/mcp/agentmind && uv run pytest -q
+# Tüm testleri (Node eklenti derleme & Python çekirdeği) çalıştırma:
+npm test
 
-# Uçtan uca kurulum duman testi
+# Sadece Python çekirdeği birim testleri (103+ test):
+npm run test:python   # veya cd skills/model-dispatch-router/mcp/agentmind && uv run pytest -q
+
+# Sadece Node.js / script testleri:
+npm run test:node
+
+# Uçtan uca kurulum duman testi (Bash):
 bash skills/model-dispatch-router/scripts/smoke-test.sh
 ```
 
